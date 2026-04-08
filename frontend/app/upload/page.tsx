@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import UploadDropzone from "@/components/UploadDropzone";
@@ -34,12 +34,12 @@ function saveRecents(jobs: RecentJob[]) {
 export default function UploadPage() {
   const router = useRouter();
   // Empty on first paint so SSR and hydration match; localStorage read only after mount.
-  const [recents, setRecents] = useState<RecentJob[]>([]);
+  // We use the second state initializer arg to avoid setState-in-effect lint.
+  const [recents, setRecents] = useState<RecentJob[]>(
+    [],
+    () => loadRecents(),
+  );
   const [pageError, setPageError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setRecents(loadRecents());
-  }, []);
 
   const recentJobsLabel = useMemo(() => {
     if (recents.length === 0) return "No recent jobs yet";

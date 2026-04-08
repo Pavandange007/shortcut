@@ -2,11 +2,21 @@
 .env
 .env.local
 .env.*.local
+!.env.example
+backend/.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 # Frontend
 frontend/node_modules/
 frontend/.next/
 frontend/out/
+frontend/.turbo/
 
 # Backend
 backend/.venv/
@@ -14,6 +24,15 @@ backend/venv/
 backend/**/__pycache__/
 backend/**/*.py[cod]
 backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.ruff_cache/
 
 # Runtime uploads / outputs (regenerate locally)
 backend/data/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
