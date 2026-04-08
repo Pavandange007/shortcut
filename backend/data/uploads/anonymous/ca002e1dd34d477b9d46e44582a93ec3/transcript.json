@@ -1,0 +1,47 @@
+﻿{
+    "words":  [
+                  {
+                      "end_ms":  400,
+                      "start_ms":  0,
+                      "segment_index":  0,
+                      "confidence":  null,
+                      "text":  "Hello"
+                  },
+                  {
+                      "end_ms":  450,
+                      "start_ms":  420,
+                      "segment_index":  0,
+                      "confidence":  null,
+                      "text":  ","
+                  },
+                  {
+                      "end_ms":  900,
+                      "start_ms":  500,
+                      "segment_index":  0,
+                      "confidence":  null,
+                      "text":  "world"
+                  },
+                  {
+                      "end_ms":  1400,
+                      "start_ms":  1200,
+                      "segment_index":  1,
+                      "confidence":  null,
+                      "text":  "this"
+                  },
+                  {
+                      "end_ms":  1550,
+                      "start_ms":  1450,
+                      "segment_index":  1,
+                      "confidence":  null,
+                      "text":  "is"
+                  },
+                  {
+                      "end_ms":  1900,
+                      "start_ms":  1600,
+                      "segment_index":  1,
+                      "confidence":  null,
+                      "text":  "caption"
+                  }
+              ],
+    "raw_text":  "Hello, world this is caption"
+}

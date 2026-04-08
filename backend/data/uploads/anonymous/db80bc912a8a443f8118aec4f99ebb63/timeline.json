@@ -1,0 +1,14 @@
+﻿[
+    {
+        "end_ms":  1000,
+        "start_ms":  0,
+        "crossfade_to_next_ms":  null,
+        "keep_audio":  true
+    },
+    {
+        "end_ms":  2000,
+        "start_ms":  1000,
+        "crossfade_to_next_ms":  null,
+        "keep_audio":  true
+    }
+]
