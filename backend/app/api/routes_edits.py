@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
@@ -19,7 +20,10 @@ from app.services.jobs_service import job_store
 from app.services.auth_service import try_get_user_id_from_authorization
 from app.services.caption_service import group_words_into_captions
 from app.services.ffmpeg_service import burn_in_captions
-from app.services.ffmpeg_service import export_rough_cut
+from app.services.rough_cut_captions_service import (
+    burn_captions_onto_existing_rough_cut,
+    export_rough_cut_and_burn_captions,
+)
 from app.services.silence_service import build_speech_timeline, compute_silence_segments
 from app.storage.files import (
     get_burned_captions_path,
@@ -125,6 +129,31 @@ async def captions_job(
     if not request.burn_in:
         return CaptionsResponse(captions=captions, burned_captions_url=None)
 
+    rough_path = get_rough_cut_path(user_id=user_id, job_id=job_id)
+    timeline_path = get_timeline_json_path(user_id=user_id, job_id=job_id)
+    if rough_path.exists() and timeline_path.exists():
+        raw_tl = json.loads(timeline_path.read_text(encoding="utf-8-sig"))
+        keep_segments: list[tuple[int, int]] = [
+            (int(item["start_ms"]), int(item["end_ms"]))
+            for item in raw_tl
+            if item.get("keep_audio")
+        ]
+        if keep_segments:
+            try:
+                burn_captions_onto_existing_rough_cut(
+                    rough_cut_path=rough_path,
+                    transcript_words=transcript.words,
+                    keep_segments=keep_segments,
+                )
+            except FileNotFoundError as e:
+                raise HTTPException(status_code=500, detail=str(e)) from e
+            except RuntimeError as e:
+                raise HTTPException(status_code=500, detail=str(e)) from e
+            return CaptionsResponse(
+                captions=captions,
+                burned_captions_url=f"/jobs/{job_id}/rough-cut",
+            )
+
     video_path = get_video_path(user_id=user_id, job_id=job_id)
     if not video_path.exists():
         raise HTTPException(
@@ -147,7 +176,6 @@ async def captions_job(
             detail=f"ffmpeg failed: {e}",
         ) from e
 
-    # For MVP we return a local filename URL placeholder.
     burned_url = burned_path.as_posix()
     return CaptionsResponse(captions=captions, burned_captions_url=burned_url)
 
@@ -193,23 +221,37 @@ async def export_job(
 
     output_path = get_rough_cut_path(user_id=user_id, job_id=job_id)
 
+    transcript_path = get_transcript_json_path(user_id=user_id, job_id=job_id)
+    if not transcript_path.exists():
+        raise HTTPException(
+            status_code=400,
+            detail="transcript.json not found. Run transcription for this job first.",
+        )
+    raw_tr = json.loads(transcript_path.read_text(encoding="utf-8-sig"))
+    tr_model = TranscriptResponse.model_validate(raw_tr)
+
     record.steps["export"] = "running"
     record.overall_status = "running"
 
     try:
         await run_in_threadpool(
-            export_rough_cut,
+            export_rough_cut_and_burn_captions,
             video_path,
             keep_segments,
             output_path,
+            tr_model.words,
             crossfade_ms=request.crossfade_ms,
         )
     except FileNotFoundError as e:
         record.steps["export"] = "failed"
         raise HTTPException(status_code=500, detail=str(e)) from e
+    except RuntimeError as e:
+        record.steps["export"] = "failed"
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
     record.steps["export"] = "done"
     record.outputs["roughCutUrl"] = f"/jobs/{job_id}/rough-cut"
+    record.outputs["media_revision"] = int(time.time() * 1000)
     record.overall_status = "completed"
 
     return ExportResponse(rough_cut_url=record.outputs["roughCutUrl"])

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 from pathlib import Path
 from typing import Final
 
@@ -10,13 +11,13 @@ logger = logging.getLogger(__name__)
 
 from app.models.schemas import BestTakeResponse
 from app.services.caption_service import group_words_into_captions
-from app.services.ffmpeg_service import burn_in_captions, export_rough_cut, shutil_which
+from app.services.ffmpeg_service import export_rough_cut
+from app.services.rough_cut_captions_service import burn_captions_onto_existing_rough_cut
 from app.services.gemini_service import select_best_take
 from app.services.silence_service import build_speech_timeline, compute_silence_segments
 from app.services.whisper_service import transcribe_with_word_timestamps
 from app.services.jobs_service import job_store
 from app.storage.files import (
-    get_burned_captions_path,
     get_captions_json_path,
     get_timeline_json_path,
     get_transcript_json_path,
@@ -123,7 +124,7 @@ def run_job_pipeline(*, user_id: str, job_id: str) -> None:
         record.steps["best_take"] = "failed"
         record.outputs["error"] = f"best-take failed: {e}"
 
-    # Captions (grouping always works; burn-in depends on FFmpeg binary)
+    # Captions JSON (source timeline). Burn-in runs on rough_cut.mp4 after export.
     record.steps["captions"] = "running"
     try:
         captions = group_words_into_captions(transcript.words)
@@ -132,13 +133,7 @@ def run_job_pipeline(*, user_id: str, job_id: str) -> None:
             captions_path,
             [c.model_dump(mode="json") for c in captions],
         )
-
-        if shutil_which("ffmpeg"):
-            burned_path = get_burned_captions_path(user_id=user_id, job_id=job_id)
-            burn_in_captions(video_path, captions, burned_path)
-            record.outputs["burnedCaptionsPath"] = burned_path.as_posix()
-        else:
-            record.outputs["burnedCaptionsPath"] = None
+        record.outputs["burnedCaptionsPath"] = None
 
         record.steps["captions"] = "done"
         logger.info("pipeline captions ok user_id=%s job_id=%s", user_id, job_id)
@@ -152,9 +147,6 @@ def run_job_pipeline(*, user_id: str, job_id: str) -> None:
     # Rough cut export depends on FFmpeg binary.
     record.steps["export"] = "running"
     try:
-        if not shutil_which("ffmpeg"):
-            raise FileNotFoundError("FFmpeg executable not found in PATH.")
-
         # Read timeline back from disk to keep the interfaces decoupled.
         timeline_path = get_timeline_json_path(user_id=user_id, job_id=job_id)
         raw_timeline = json.loads(timeline_path.read_text(encoding="utf-8-sig"))
@@ -168,8 +160,24 @@ def run_job_pipeline(*, user_id: str, job_id: str) -> None:
             raise ValueError("No keep segments found in timeline.json")
 
         output_path = get_rough_cut_path(user_id=user_id, job_id=job_id)
+        record.outputs.pop("error_caption_burn", None)
         export_rough_cut(video_path, keep_segments, output_path, crossfade_ms=150)
+        try:
+            burn_captions_onto_existing_rough_cut(
+                rough_cut_path=output_path,
+                transcript_words=transcript.words,
+                keep_segments=keep_segments,
+            )
+        except Exception as burn_exc:
+            record.outputs["error_caption_burn"] = str(burn_exc)
+            logger.exception(
+                "pipeline caption burn onto rough cut failed user_id=%s job_id=%s",
+                user_id,
+                job_id,
+            )
+        # Expose URL only after burn attempt so clients never cache a pre-burn file.
         record.outputs["roughCutUrl"] = f"/jobs/{job_id}/rough-cut"
+        record.outputs["media_revision"] = int(time.time() * 1000)
         record.steps["export"] = "done"
         record.overall_status = "completed"
         logger.info("pipeline completed user_id=%s job_id=%s", user_id, job_id)
@@ -178,8 +186,8 @@ def run_job_pipeline(*, user_id: str, job_id: str) -> None:
         record.outputs["error_export"] = str(e)
         # Captions + transcript are still usable even if FFmpeg export isn't available.
         record.overall_status = "completed"
-        logger.warning(
-            "pipeline export skipped/failed user_id=%s job_id=%s: %s",
+        logger.error(
+            "pipeline export failed user_id=%s job_id=%s — stored in outputs.error_export: %s",
             user_id,
             job_id,
             e,

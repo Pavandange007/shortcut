@@ -5,6 +5,42 @@ import re
 from app.models.schemas import CaptionLine, WordTiming
 
 
+def remap_word_timings_to_rough_cut(
+    words: list[WordTiming],
+    keep_segments: list[tuple[int, int]],
+) -> list[WordTiming]:
+    """
+    Map source-video word times onto the rough-cut output timeline (ms from t=0).
+
+    Each keep segment is concatenated in order; words are clipped to segment bounds.
+    Audio crossfades shorten the real output slightly vs. sum(segment lengths); subtitle
+    timing may drift by a small fraction of a second at joins (MVP).
+    """
+
+    result: list[WordTiming] = []
+    cumulative_out = 0
+    for seg_start, seg_end in keep_segments:
+        for w in words:
+            ws, we = w.start_ms, w.end_ms
+            if we <= seg_start or ws >= seg_end:
+                continue
+            o0 = max(ws, seg_start)
+            o1 = min(we, seg_end)
+            if o1 <= o0:
+                continue
+            result.append(
+                WordTiming(
+                    text=w.text,
+                    start_ms=cumulative_out + (o0 - seg_start),
+                    end_ms=cumulative_out + (o1 - seg_start),
+                    confidence=w.confidence,
+                    segment_index=w.segment_index,
+                )
+            )
+        cumulative_out += seg_end - seg_start
+    return result
+
+
 def _words_to_text(words: list[WordTiming]) -> str:
     raw = " ".join(w.text.strip() for w in words if w.text.strip())
     # Remove space before punctuation for readability.

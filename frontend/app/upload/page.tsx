@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import UploadDropzone from "@/components/UploadDropzone";
@@ -33,13 +33,15 @@ function saveRecents(jobs: RecentJob[]) {
 
 export default function UploadPage() {
   const router = useRouter();
-  // Empty on first paint so SSR and hydration match; localStorage read only after mount.
-  // We use the second state initializer arg to avoid setState-in-effect lint.
-  const [recents, setRecents] = useState<RecentJob[]>(
-    [],
-    () => loadRecents(),
-  );
+  // Empty on first paint so SSR and hydration match; localStorage only after mount.
+  const [recents, setRecents] = useState<RecentJob[]>([]);
   const [pageError, setPageError] = useState<string | null>(null);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setRecents(loadRecents());
+    });
+  }, []);
 
   const recentJobsLabel = useMemo(() => {
     if (recents.length === 0) return "No recent jobs yet";
@@ -59,6 +61,7 @@ export default function UploadPage() {
     try {
       setPageError(null);
       const jobId = await createAndUploadMutation.mutateAsync(file);
+      console.log("[Shortcut] upload complete, navigating to job", jobId);
       const next: RecentJob = {
         jobId,
         createdAt: Date.now(),
@@ -72,6 +75,7 @@ export default function UploadPage() {
       saveRecents(merged);
       router.push(`/jobs/${jobId}`);
     } catch (e) {
+      console.error("[Shortcut] upload failed", e);
       setPageError(e instanceof Error ? e.message : "Upload failed.");
     }
   }

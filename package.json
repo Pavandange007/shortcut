@@ -1,0 +1,5 @@
+{
+  "name": "shortcut-monorepo",
+  "private": true,
+  "description": "Stops Node/enhanced-resolve from walking past this folder to an unrelated package.json (e.g. in the user home)."
+}

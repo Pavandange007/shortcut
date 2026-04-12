@@ -30,6 +30,8 @@ class JobUploadResponse(BaseModel):
 class HealthResponse(BaseModel):
     ok: bool = True
     version: str = "0.1.0"
+    ffmpeg_available: bool = False
+    ffmpeg_path: str | None = None
 
 
 class WordTiming(BaseModel):

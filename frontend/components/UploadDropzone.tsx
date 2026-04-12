@@ -47,7 +47,7 @@ async function getVideoDurationSeconds(file: File): Promise<number | null> {
 export default function UploadDropzone({
   onUpload,
   isUploading,
-  maxSizeMb = 500,
+  maxSizeMb = 1024,
   acceptMimeTypes = [...defaultAccept],
 }: {
   onUpload: (file: File) => Promise<void>;

@@ -32,6 +32,31 @@ function mapJobPayload(data: JobApiPayload): Job {
   };
 }
 
+/** Use when logging `unknown` / Error inside plain objects (avoids `[object Error]`). */
+export function serializeUnknownError(e: unknown): {
+  errorMessage: string;
+  errorName?: string;
+  errorStack?: string;
+} {
+  if (e instanceof Error) {
+    return {
+      errorMessage: e.message,
+      errorName: e.name,
+      errorStack: e.stack,
+    };
+  }
+  return { errorMessage: String(e) };
+}
+
+/** True when the API returned 404 for this job (e.g. server restarted; jobs are in-memory). */
+export function isJobNotFoundError(e: unknown): boolean {
+  const m = serializeUnknownError(e).errorMessage;
+  return (
+    m.includes("404") &&
+    (m.includes("Job not found") || m.includes('"detail":"Job not found"'))
+  );
+}
+
 async function parseJson<T>(res: Response): Promise<T> {
   const text = await res.text();
   if (!res.ok) {
@@ -112,10 +137,56 @@ export async function uploadVideo(jobId: string, file: File): Promise<void> {
 }
 
 export async function getJobStatus(jobId: string): Promise<Job> {
-  const res = await authedFetch(`${API_BASE_URL}/jobs/${jobId}`, {
-    method: "GET",
-  });
-  const data = await parseJson<JobApiPayload>(res);
+  const url = `${API_BASE_URL}/jobs/${jobId}`;
+  const res = await authedFetch(url, { method: "GET" });
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(
+      `Request failed (${res.status} ${res.statusText}): ${text.slice(0, 500) || "(empty body)"}`,
+    );
+  }
+  let data: JobApiPayload;
+  try {
+    data = (text ? JSON.parse(text) : {}) as JobApiPayload;
+  } catch (parseErr) {
+    const hint =
+      parseErr instanceof Error ? parseErr.message : String(parseErr);
+    throw new Error(
+      `Invalid JSON from GET /jobs/${jobId}: ${hint}; body preview: ${text.slice(0, 240)}`,
+    );
+  }
   return mapJobPayload(data);
+}
+
+/**
+ * Load a job-scoped media URL with Bearer auth and return a `blob:` URL for `<video src>`.
+ * Browser media elements do not send `Authorization`; without this, `/jobs/.../rough-cut` 404s.
+ */
+export async function fetchAuthenticatedMediaObjectUrl(
+  mediaPathOrUrl: string,
+  options?: { cacheBust?: string | number },
+): Promise<string> {
+  let absolute =
+    mediaPathOrUrl.startsWith("http://") ||
+    mediaPathOrUrl.startsWith("https://")
+      ? mediaPathOrUrl
+      : `${API_BASE_URL}${
+          mediaPathOrUrl.startsWith("/") ? "" : "/"
+        }${mediaPathOrUrl}`;
+
+  if (options?.cacheBust != null && String(options.cacheBust) !== "") {
+    const sep = absolute.includes("?") ? "&" : "?";
+    absolute = `${absolute}${sep}v=${encodeURIComponent(String(options.cacheBust))}`;
+  }
+
+  const res = await authedFetch(absolute, { method: "GET" });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(
+      `Media fetch failed (${res.status}): ${text.slice(0, 400) || res.statusText}`,
+    );
+  }
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
 }
 

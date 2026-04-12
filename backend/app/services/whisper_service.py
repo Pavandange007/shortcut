@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import logging
 import threading
 import time
@@ -13,6 +14,29 @@ logger = logging.getLogger(__name__)
 
 _MODEL_LOCK: Final[threading.Lock] = threading.Lock()
 _MODEL = None
+
+
+def _is_cuda_load_failure(exc: BaseException) -> bool:
+    """True if the exception likely means this process cannot use the configured CUDA device."""
+    msg = str(exc).lower()
+    return (
+        "unsupported device" in msg
+        or "cuda" in msg
+        or "cudnn" in msg
+        or "nvrtc" in msg
+        or "no cuda" in msg
+    )
+
+
+def _try_create_whisper_model(*, device: str, compute_type: str):
+    """Instantiate faster-whisper; caller handles fallbacks."""
+    from faster_whisper import WhisperModel  # type: ignore
+
+    return WhisperModel(
+        settings.whisper_model_name,
+        device=device,
+        compute_type=compute_type,
+    )
 
 
 def _get_model():
@@ -32,12 +56,10 @@ def _get_model():
             return _MODEL
 
         # Local import keeps scaffold usable even if the dependency isn't installed.
-        try:
-            from faster_whisper import WhisperModel  # type: ignore
-        except ModuleNotFoundError as e:
+        if importlib.util.find_spec("faster_whisper") is None:
             raise RuntimeError(
                 "faster-whisper is not installed. Install backend requirements first."
-            ) from e
+            )
 
         device = settings.gpu_device
         compute_type = "float16"
@@ -46,13 +68,23 @@ def _get_model():
         if device == "cpu":
             compute_type = "int8"
         elif device.startswith("cuda"):
+            # faster-whisper uses CTranslate2, not PyTorch — detect GPU via ctranslate2 first.
+            # Without this, missing `torch` incorrectly forces CPU even when CUDA works (e.g. RTX 3050).
+            cuda_ok = False
             try:
-                import torch  # type: ignore
+                import ctranslate2 as ct2
 
-                if not torch.cuda.is_available():
-                    device = "cpu"
-                    compute_type = "int8"
+                cuda_ok = ct2.get_cuda_device_count() > 0
             except Exception:
+                pass
+            if not cuda_ok:
+                try:
+                    import torch  # type: ignore
+
+                    cuda_ok = bool(torch.cuda.is_available())
+                except Exception:
+                    pass
+            if not cuda_ok:
                 device = "cpu"
                 compute_type = "int8"
 
@@ -63,14 +95,22 @@ def _get_model():
             compute_type,
         )
         t0 = time.perf_counter()
-        _MODEL = WhisperModel(
-            settings.whisper_model_name,
-            device=device,
-            compute_type=compute_type,
-        )
+        try:
+            _MODEL = _try_create_whisper_model(device=device, compute_type=compute_type)
+        except Exception as e:
+            if device == "cpu" or not _is_cuda_load_failure(e):
+                raise
+            logger.warning(
+                "whisper: GPU init failed (%s); falling back to CPU int8",
+                e,
+            )
+            device = "cpu"
+            compute_type = "int8"
+            _MODEL = _try_create_whisper_model(device=device, compute_type=compute_type)
         logger.info(
-            "whisper: model ready in %.1fs",
+            "whisper: model ready in %.1fs (device=%s)",
             time.perf_counter() - t0,
+            device,
         )
         return _MODEL
 

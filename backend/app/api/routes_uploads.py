@@ -5,13 +5,21 @@ import threading
 
 from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 
+from app.core.config import settings
 from app.models.schemas import JobCreateResponse, JobResponse, JobUploadResponse
 from app.services.auth_service import try_get_user_id_from_authorization
 from app.services.jobs_service import job_store
-from app.workers.background import run_job_pipeline
 from app.storage.files import get_video_path
 
 router = APIRouter()
+
+
+def _run_pipeline_thread(*, user_id: str, job_id: str) -> None:
+    """Import worker only when needed so API startup does not load Whisper/Gemini stack."""
+
+    from app.workers.background import run_job_pipeline
+
+    run_job_pipeline(user_id=user_id, job_id=job_id)
 
 
 def resolve_user_id(authorization: str | None, x_user_id: str | None) -> str:
@@ -47,19 +55,30 @@ async def upload_job_video(
         video_path = video_path.with_suffix(suffix)
         video_path.parent.mkdir(parents=True, exist_ok=True)
 
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    written = 0
     try:
         with video_path.open("wb") as out_file:
             while True:
                 chunk = await file.read(1024 * 1024)
                 if not chunk:
                     break
+                written += len(chunk)
+                if written > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File exceeds max size of {settings.max_upload_mb} MB.",
+                    )
                 out_file.write(chunk)
+    except HTTPException:
+        video_path.unlink(missing_ok=True)
+        raise
     finally:
         await file.close()
 
     # Kick off the MVP pipeline in a dedicated thread to avoid blocking.
     threading.Thread(
-        target=run_job_pipeline,
+        target=_run_pipeline_thread,
         kwargs={"user_id": user_id, "job_id": job_id},
         daemon=True,
     ).start()

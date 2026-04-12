@@ -4,8 +4,6 @@ import json
 import threading
 from typing import Final
 
-from google import genai
-
 from app.core.config import settings
 from app.models.schemas import BestTakeResponse
 from app.prompts.best_take_prompt import build_best_take_prompt
@@ -28,6 +26,12 @@ def _get_client():
             return _CLIENT
         if not settings.gemini_api_key:
             raise RuntimeError("GEMINI_API_KEY is not configured.")
+        try:
+            from google import genai
+        except ModuleNotFoundError as e:
+            raise RuntimeError(
+                "google-genai is not installed. Install backend requirements (e.g. pip install google-genai)."
+            ) from e
         _CLIENT = genai.Client(api_key=settings.gemini_api_key)
         return _CLIENT
 

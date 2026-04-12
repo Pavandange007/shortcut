@@ -19,6 +19,9 @@ export interface Job {
     exportedUrl?: string;
     error?: string;
     error_export?: string;
+    error_caption_burn?: string;
+    /** Bust `<video>` blob cache when the rough-cut file is replaced. */
+    media_revision?: number;
     burnedCaptionsPath?: string | null;
     bestTakeIndex?: number;
     bestTakeExplanation?: string;

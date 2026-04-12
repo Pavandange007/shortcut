@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +14,7 @@ from app.api.routes_edits import router as edits_router
 from app.api.routes_retakes import router as retakes_router
 from app.api.routes_auth import router as auth_router
 from app.core.config import settings
+from app.services.ffmpeg_service import log_ffmpeg_startup_status
 
 
 def _configure_app_logging() -> None:
@@ -30,9 +32,19 @@ def _configure_app_logging() -> None:
     log.propagate = False
 
 
+@asynccontextmanager
+async def _app_lifespan(app: FastAPI):
+    log_ffmpeg_startup_status()
+    yield
+
+
 def create_app() -> FastAPI:
     _configure_app_logging()
-    app = FastAPI(title="Shotcut AI - Video Editor Backend", version="0.1.0")
+    app = FastAPI(
+        title="Shotcut AI - Video Editor Backend",
+        version="0.1.0",
+        lifespan=_app_lifespan,
+    )
 
     app.add_middleware(
         CORSMiddleware,

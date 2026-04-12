@@ -1,11 +1,157 @@
 from __future__ import annotations
 
+import json
+import logging
 import os
+import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
+from app.core.config import settings
 from app.models.schemas import CaptionLine
+
+logger = logging.getLogger(__name__)
+
+
+def resolve_ffprobe_executable() -> Path | None:
+    """``ffprobe`` next to configured ``ffmpeg``, or ``shutil.which("ffprobe")``."""
+
+    ff = resolve_ffmpeg_executable()
+    if ff is not None:
+        name = "ffprobe.exe" if os.name == "nt" else "ffprobe"
+        sibling = ff.parent / name
+        if sibling.is_file():
+            return sibling
+    found = shutil.which("ffprobe")
+    return Path(found) if found else None
+
+
+def probe_video_dimensions(path: Path) -> tuple[int, int] | None:
+    """Return ``(width, height)`` of the first video stream, or ``None`` if unknown."""
+
+    exe = resolve_ffprobe_executable()
+    if exe is None or not path.is_file():
+        return None
+    cmd = [
+        str(exe),
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=width,height",
+        "-of",
+        "json",
+        str(path),
+    ]
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if proc.returncode != 0:
+        return None
+    try:
+        data = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        return None
+    streams = data.get("streams") or []
+    if not streams:
+        return None
+    w = streams[0].get("width")
+    h = streams[0].get("height")
+    if isinstance(w, int) and isinstance(h, int) and w > 0 and h > 0:
+        return (w, h)
+    return None
+
+
+def default_os_fonts_dir() -> Path | None:
+    """Directory libass should search (Windows/macOS/Linux); ``None`` if unknown."""
+
+    if os.name == "nt":
+        windir = os.environ.get("WINDIR", r"C:\Windows")
+        p = Path(windir) / "Fonts"
+        return p if p.is_dir() else None
+    if sys.platform == "darwin":
+        p = Path("/System/Library/Fonts")
+        return p if p.is_dir() else None
+    for candidate in (Path("/usr/share/fonts"), Path("/usr/local/share/fonts")):
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def resolve_ffmpeg_executable() -> Path | None:
+    """
+    Return the ffmpeg binary: valid ``FFMPEG_BIN`` if set, otherwise ``shutil.which("ffmpeg")``.
+    A non-existent ``FFMPEG_BIN`` (e.g. a leftover placeholder path) is ignored so PATH can still win.
+    """
+    raw = settings.ffmpeg_bin.strip()
+    if raw:
+        candidate = Path(raw).expanduser()
+        if candidate.is_file():
+            return candidate
+    found = shutil.which("ffmpeg")
+    return Path(found) if found else None
+
+
+def ffmpeg_available() -> bool:
+    """True if a usable ffmpeg binary exists (configured path or PATH)."""
+    return resolve_ffmpeg_executable() is not None
+
+
+def get_ffmpeg_status() -> tuple[bool, str | None]:
+    """Return ``(available, resolved_executable_path)`` for health checks and logging."""
+    exe = resolve_ffmpeg_executable()
+    if exe is None:
+        return (False, None)
+    return (True, str(exe))
+
+
+def log_ffmpeg_startup_status() -> None:
+    """Log a single startup line to stderr (``app`` logger) for operators."""
+    log = logging.getLogger("app")
+    available, path = get_ffmpeg_status()
+    raw_bin = settings.ffmpeg_bin.strip()
+    if available:
+        log.info(
+            "startup: ffmpeg ok path=%s FFMPEG_BIN=%r",
+            path,
+            raw_bin or "",
+        )
+    else:
+        log.warning(
+            "startup: ffmpeg missing — rough-cut/caption burn-in will fail until ffmpeg is on PATH or "
+            "FFMPEG_BIN points to ffmpeg.exe (current FFMPEG_BIN=%r)",
+            raw_bin or "(unset)",
+        )
+
+
+def _ffmpeg_exe_or_raise() -> Path:
+    raw = settings.ffmpeg_bin.strip()
+    configured_missing = bool(raw) and not Path(raw).expanduser().is_file()
+    exe = resolve_ffmpeg_executable()
+    if exe is not None:
+        if configured_missing:
+            logger.warning(
+                "FFMPEG_BIN=%r is not a valid file; using ffmpeg from PATH (%s)",
+                raw,
+                exe,
+            )
+        return exe
+    if raw:
+        raise FileNotFoundError(
+            f"FFmpeg not found at FFMPEG_BIN={raw!r} and not on PATH. "
+            "Install FFmpeg, fix the path to ffmpeg.exe, or clear FFMPEG_BIN if ffmpeg is on PATH."
+        )
+    raise FileNotFoundError(
+        "FFmpeg executable not found in PATH. Install FFmpeg, add it to PATH, or set "
+        "FFMPEG_BIN in .env to the full path (e.g. C:/ffmpeg/bin/ffmpeg.exe)."
+    )
 
 
 def ms_to_ass_time(ms: int) -> str:
@@ -30,6 +176,53 @@ def ms_to_ass_time(ms: int) -> str:
     return f"{hours}:{minutes:02d}:{seconds:02d}.{cs:02d}"
 
 
+def _path_for_ffmpeg_subtitles_filter(path: Path) -> str:
+    """
+    Build a path string for the ``subtitles`` video filter.
+
+    Filter arguments use ``:`` as a separator; a Windows drive letter (``C:``)
+    must be written as ``C\\:`` or parsing breaks and FFmpeg exits with an error.
+    """
+    resolved = path.resolve()
+    s = resolved.as_posix()
+    if len(s) >= 2 and s[1] == ":" and s[0].isalpha():
+        s = f"{s[0]}\\:{s[2:]}"
+    return s.replace("'", r"\'")
+
+
+def _subtitles_video_filter_arg(ass_path: Path, fonts_dir: Path | None) -> str:
+    """Single ``-vf`` value for libass burn-in (optional OS fonts dir for glyph lookup)."""
+
+    ass_esc = _path_for_ffmpeg_subtitles_filter(ass_path)
+    if fonts_dir is not None and fonts_dir.is_dir():
+        fd = fonts_dir.resolve().as_posix()
+        if len(fd) >= 2 and fd[1] == ":" and fd[0].isalpha():
+            fd = f"{fd[0]}\\:{fd[2:]}"
+        fd = fd.replace("'", r"\'")
+        return f"subtitles='{ass_esc}':fontsdir='{fd}'"
+    return f"subtitles='{ass_esc}'"
+
+
+def _run_ffmpeg(cmd: list[str], *, context: str) -> None:
+    """Run FFmpeg; raise ``RuntimeError`` with log output if it fails."""
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if proc.returncode == 0:
+        return
+    err = (proc.stderr or "").strip()
+    if not err:
+        err = (proc.stdout or "").strip()
+    tail = err[-4000:] if len(err) > 4000 else err
+    raise RuntimeError(
+        f"FFmpeg {context} failed (exit {proc.returncode}): {tail or '(no output)'}"
+    )
+
+
 def _escape_ass_text(text: str) -> str:
     # Minimal escaping to avoid override tags breaking rendering.
     return (
@@ -46,7 +239,8 @@ def burn_in_captions(
     output_path: Path,
     *,
     font_name: str = "Arial",
-    font_size: int = 48,
+    font_size: int | None = None,
+    fonts_dir: Path | None = None,
 ) -> None:
     """
     Burn captions into the video using FFmpeg + ASS subtitles.
@@ -56,7 +250,8 @@ def burn_in_captions(
         captions: Caption lines with word-accurate timestamps.
         output_path: Output MP4 file path.
         font_name: Font used by ASS.
-        font_size: Font size in ASS points.
+        font_size: Font size in ASS points; ``None`` scales from video height.
+        fonts_dir: Optional font search path for libass (defaults to OS fonts when found).
     """
 
     if not video_path.exists():
@@ -64,20 +259,55 @@ def burn_in_captions(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    if not captions:
+        logger.warning(
+            "ffmpeg: caption burn-in — zero lines; copying video without re-encode"
+        )
+        shutil.copy2(video_path, output_path)
+        return
+
+    dims = probe_video_dimensions(video_path)
+    if dims is not None:
+        play_w, play_h = dims
+    else:
+        play_w, play_h = 1920, 1080
+    if font_size is None:
+        font_size = max(28, min(72, int(play_h / 16)))
+
+    resolved_fonts = fonts_dir if fonts_dir is not None else default_os_fonts_dir()
+    if resolved_fonts is not None:
+        logger.info(
+            "ffmpeg: caption burn-in fontsdir=%s play_res=%dx%d font_size=%d lines=%d",
+            resolved_fonts,
+            play_w,
+            play_h,
+            font_size,
+            len(captions),
+        )
+    else:
+        logger.info(
+            "ffmpeg: caption burn-in (no fontsdir) play_res=%dx%d font_size=%d lines=%d",
+            play_w,
+            play_h,
+            font_size,
+            len(captions),
+        )
+
     ass_lines: list[str] = []
     ass_lines.append("[Script Info]")
     ass_lines.append("ScriptType: v4.00+")
-    ass_lines.append("PlayResX: 1920")
-    ass_lines.append("PlayResY: 1080")
+    ass_lines.append("ScaledBorderAndShadow: yes")
+    ass_lines.append(f"PlayResX: {play_w}")
+    ass_lines.append(f"PlayResY: {play_h}")
     ass_lines.append("WrapStyle: 0")
     ass_lines.append("")
     ass_lines.append("[V4+ Styles]")
     ass_lines.append(
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding"
     )
-    # PrimaryColour is &HAABBGGRR (ASS). We'll use white text with a subtle shadow.
+    # PrimaryColour is &HAABBGGRR (ASS). White text, thick dark outline for contrast on any footage.
     ass_lines.append(
-        f"Style: Default,{font_name},{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,2,0,2,20,20,60,1"
+        f"Style: Default,{font_name},{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,4,2,2,20,20,80,1"
     )
     ass_lines.append("")
     ass_lines.append("[Events]")
@@ -104,20 +334,19 @@ def burn_in_captions(
         f.write(ass_text)
 
     try:
-        ass_path_str = str(ass_path).replace("\\", "/")
         video_path_str = str(video_path).replace("\\", "/")
         output_path_str = str(output_path).replace("\\", "/")
+        vf = _subtitles_video_filter_arg(ass_path, resolved_fonts)
 
-        if not shutil_which("ffmpeg"):
-            raise FileNotFoundError("FFmpeg executable not found in PATH.")
+        ffmpeg_exe = _ffmpeg_exe_or_raise()
 
         cmd = [
-            "ffmpeg",
+            str(ffmpeg_exe),
             "-y",
             "-i",
             video_path_str,
             "-vf",
-            f"subtitles={ass_path_str}",
+            vf,
             "-c:v",
             "libx264",
             "-crf",
@@ -131,22 +360,12 @@ def burn_in_captions(
             output_path_str,
         ]
 
-        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        _run_ffmpeg(cmd, context="caption burn-in")
     finally:
         try:
             os.remove(ass_path)
         except OSError:
             pass
-
-
-def shutil_which(cmd: str) -> bool:
-    """
-    Lightweight `shutil.which` wrapper (keeps imports local). Returns bool.
-    """
-
-    import shutil
-
-    return shutil.which(cmd) is not None
 
 
 def export_rough_cut(
@@ -216,14 +435,13 @@ def export_rough_cut(
 
     filter_complex = ";".join(filters)
 
-    if not shutil_which("ffmpeg"):
-        raise FileNotFoundError("FFmpeg executable not found in PATH.")
+    ffmpeg_exe = _ffmpeg_exe_or_raise()
 
     video_path_str = str(video_path).replace("\\", "/")
     output_path_str = str(output_path).replace("\\", "/")
 
     cmd = [
-        "ffmpeg",
+        str(ffmpeg_exe),
         "-y",
         "-i",
         video_path_str,
@@ -248,5 +466,5 @@ def export_rough_cut(
         output_path_str,
     ]
 
-    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    _run_ffmpeg(cmd, context="rough-cut export")
 
