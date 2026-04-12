@@ -4,7 +4,7 @@ All notable changes to this backend are documented here.
 
 ## 2026-04-11
 
-- Repo hygiene: `__pycache__` / `*.pyc` removed from version control; `.gitignore` extended (root `.next/`, `backend/.env`, `!backend/.env.example`). Added root `LICENSE` (MIT), `CONTRIBUTING.md`, `SECURITY.md`.
+- Repo hygiene: `__pycache__` / `*.pyc` removed from version control; `.gitignore` extended (root `.next/`, `backend/.env`, `!backend/.env.example`, `**/.venv/`). Added root `LICENSE` (MIT), `CONTRIBUTING.md`, `SECURITY.md`. If `backend/.venv` was ever committed, rewrite history with `git filter-branch` (or `git filter-repo`) removing that path, then `git push --force`.
 
 - Uploads: default max video size is **1024 MB** (frontend dropzone + streaming limit in `POST /jobs/{id}/upload`). Override with `MAX_UPLOAD_MB` in `.env`.
 

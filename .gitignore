@@ -26,9 +26,10 @@ frontend/.env*.local
 /.next/
 /out/
 
-# Backend
+# Backend — never commit virtualenvs (large binaries + wrong for GitHub)
 backend/.venv/
 backend/venv/
+**/.venv/
 **/__pycache__/
 **/*.py[cod]
 *$py.class
