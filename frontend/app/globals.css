@@ -1,9 +1,27 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0b0b0f;
-  --foreground: #f3f4f6;
-  /* Tweak theme tokens here; Tailwind theme lives in tailwind.config.js */
+  --background: #06070b;
+  --foreground: #f5f7ff;
+  --muted-foreground: #aab2cb;
+  --surface-1: #0f1220;
+  --surface-2: #151a2c;
+  --surface-3: #1d2340;
+  --accent: #7c5cff;
+  --accent-2: #3ba7ff;
+  --accent-gradient: linear-gradient(135deg, #7c5cff 0%, #3ba7ff 100%);
+  --success: #34d399;
+  --warning: #f59e0b;
+  --error: #fb7185;
+  --info: #38bdf8;
+  --border-soft: rgba(255, 255, 255, 0.12);
+  --shadow-elevated:
+    0 24px 50px rgba(3, 8, 28, 0.45),
+    0 8px 24px rgba(5, 9, 30, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --ease-out-cubic: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: 180ms;
+  --duration-normal: 280ms;
   --font-ui-sans: var(--font-geist-sans);
   --font-ui-mono: var(--font-geist-mono);
 }
@@ -11,14 +29,24 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-accent: var(--accent);
+  --color-accent-2: var(--accent-2);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-error: var(--error);
+  --color-info: var(--info);
   --font-sans: var(--font-ui-sans);
   --font-mono: var(--font-ui-mono);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0b0b0f;
-    --foreground: #f3f4f6;
+    --background: #06070b;
+    --foreground: #f5f7ff;
   }
 }
 
@@ -26,4 +54,95 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
+  min-height: 100vh;
+}
+
+* {
+  border-color: var(--border-soft);
+}
+
+.panel-surface {
+  background: linear-gradient(
+    160deg,
+    color-mix(in oklab, var(--surface-2) 78%, transparent),
+    color-mix(in oklab, var(--surface-1) 88%, transparent)
+  );
+  border: 1px solid var(--border-soft);
+  box-shadow: var(--shadow-elevated);
+}
+
+.glass {
+  background: color-mix(in oklab, var(--surface-1) 68%, transparent);
+  backdrop-filter: blur(14px) saturate(1.25);
+  -webkit-backdrop-filter: blur(14px) saturate(1.25);
+  border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
+}
+
+.animate-fade-in {
+  animation: fade-in var(--duration-normal) var(--ease-out-cubic) both;
+}
+
+.animate-slide-up {
+  animation: slide-up var(--duration-normal) var(--ease-out-cubic) both;
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 1.8s var(--ease-out-cubic) infinite;
+}
+
+.animate-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.animate-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.18),
+    transparent
+  );
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-subtle {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import type { JobStepKey, StepState } from "../lib/types";
+import Tooltip from "./Tooltip";
 
 const stepOrder: JobStepKey[] = [
   "silence_removal",
@@ -10,72 +11,64 @@ const stepOrder: JobStepKey[] = [
 ];
 
 const stepLabels: Record<JobStepKey, string> = {
-  silence_removal: "Intelligent Silence Removal",
-  best_take: "Retake Analyzer (Best Take)",
-  captions: "Frame-Perfect Captions",
-  export: "Timeline Export (Rough Cut)",
+  silence_removal: "Silence",
+  best_take: "Best Take",
+  captions: "Captions",
+  export: "Export",
 };
 
-function stateToTone(state: StepState): "neutral" | "success" | "warning" | "danger" {
-  if (state === "done") return "success";
-  if (state === "running") return "warning";
-  if (state === "failed") return "danger";
-  return "neutral";
-}
-
-function stateToDot(state: StepState): string {
-  if (state === "done") return "bg-emerald-400";
-  if (state === "running") return "bg-amber-400";
-  if (state === "failed") return "bg-rose-400";
-  return "bg-foreground/30";
-}
+const stepDescriptions: Record<JobStepKey, string> = {
+  silence_removal: "Analyzing audio and removing dead air.",
+  best_take: "Selecting strongest takes and pacing.",
+  captions: "Generating and timing captions precisely.",
+  export: "Rendering your polished rough cut.",
+};
 
 export default function JobProgress({
   statusByStep,
 }: {
   statusByStep: Partial<Record<JobStepKey, StepState>>;
 }) {
+  const firstPending = stepOrder.findIndex((key) => (statusByStep[key] ?? "pending") !== "done");
+  const progressCount = firstPending === -1 ? stepOrder.length : firstPending;
+
   return (
-    <ol className="flex flex-col gap-3">
+    <ol className="relative flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="absolute left-2 right-2 top-3 hidden h-px bg-white/10 sm:block" />
+      <div
+        className="absolute left-2 top-3 hidden h-px bg-gradient-to-r from-accent to-accent-2 transition-all duration-500 sm:block"
+        style={{ width: `${Math.max(0, Math.min(100, (progressCount / Math.max(1, stepOrder.length - 1)) * 100))}%` }}
+      />
       {stepOrder.map((key, idx) => {
         const state = statusByStep[key] ?? "pending";
-        const isLast = idx === stepOrder.length - 1;
-        const tone = stateToTone(state);
+        const toneClass =
+          state === "done"
+            ? "bg-success"
+            : state === "running"
+              ? "bg-warning animate-pulse-subtle"
+              : state === "failed"
+                ? "bg-error"
+                : "bg-white/35";
 
         return (
-          <li key={key} className="flex items-start gap-3">
-            <div className="relative mt-1 flex h-6 w-6 shrink-0 items-center justify-center">
-              <span className={`h-2.5 w-2.5 rounded-full ${stateToDot(state)}`} />
-              {!isLast ? (
-                <span
-                  className="absolute left-1/2 top-6 h-9 -translate-x-1/2 border-l border-foreground/10"
-                  aria-hidden="true"
-                />
-              ) : null}
+          <li key={key} className="relative z-10 flex flex-1 items-center gap-2 sm:flex-col sm:items-start">
+            <div className="panel-surface inline-flex h-7 w-7 items-center justify-center rounded-full">
+              <Tooltip content={stepDescriptions[key]}>
+                <span className={`h-2.5 w-2.5 rounded-full ${toneClass}`} />
+              </Tooltip>
             </div>
-
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-semibold">
-                  {stepLabels[key]}
-                </span>
-                <span
-                  className={[
-                    "inline-flex items-center rounded-full px-2.5 py-1 text-xs ring-1 ring-foreground/15",
-                    tone === "success" ? "bg-emerald-500/15 text-emerald-200 ring-emerald-500/30" : "",
-                    tone === "warning" ? "bg-amber-500/15 text-amber-200 ring-amber-500/30" : "",
-                    tone === "danger" ? "bg-rose-500/15 text-rose-200 ring-rose-500/30" : "",
-                    tone === "neutral" ? "bg-foreground/10 text-foreground/70 ring-foreground/15" : "",
-                  ].join(" ")}
-                >
-                  {state === "pending"
-                    ? "Pending"
-                    : state === "running"
-                      ? "Running"
-                      : state === "done"
-                        ? "Done"
-                        : "Failed"}
-                </span>
+            <div>
+              <div className="text-xs font-semibold text-foreground/90 sm:text-[11px]">
+                {idx + 1}. {stepLabels[key]}
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                {state === "pending"
+                  ? "Pending"
+                  : state === "running"
+                    ? "Running"
+                    : state === "done"
+                      ? "Completed"
+                      : "Failed"}
               </div>
             </div>
           </li>

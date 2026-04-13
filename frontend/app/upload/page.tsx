@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import UploadDropzone from "@/components/UploadDropzone";
+import Button from "@/components/Button";
 import type { JobOverallStatus } from "@/lib/types";
 import { createJob, uploadVideo } from "@/lib/api-client";
 
@@ -36,6 +37,7 @@ export default function UploadPage() {
   // Empty on first paint so SSR and hydration match; localStorage only after mount.
   const [recents, setRecents] = useState<RecentJob[]>([]);
   const [pageError, setPageError] = useState<string | null>(null);
+  const [showRecents, setShowRecents] = useState(false);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -81,81 +83,81 @@ export default function UploadPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-10">
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-        <section className="rounded-3xl bg-background/10 p-6 ring-1 ring-foreground/10 lg:col-span-1">
-          <h1 className="text-xl font-semibold tracking-tight">
-            AI Video Editor MVP
+    <main className="mx-auto w-full max-w-7xl flex-1 px-6 py-10">
+      <div className="mx-auto flex max-w-4xl flex-col gap-6">
+        <header className="text-center animate-fade-in">
+          <h1 className="text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
+            Your AI video co-pilot
           </h1>
-          <p className="mt-2 text-sm text-foreground/70">
-            Upload a video, then we generate a rough cut by analyzing pacing,
-            removing silent gaps, and burning millisecond-accurate captions.
+          <p className="mx-auto mt-3 max-w-2xl text-sm text-muted-foreground sm:text-base">
+            Drop one file and Shotcut AI handles silence cleanup, pacing, hooks, captions, and a
+            rough cut export you can iterate on instantly.
           </p>
+        </header>
 
-          <div className="mt-6 flex flex-col gap-3">
-            {[
-              ["silence_removal", "1. Silence Removal"],
-              ["best_take", "2. Best Take"],
-              ["captions", "3. Captions"],
-              ["export", "4. Export Rough Cut"],
-            ].map(([key, label], idx) => (
-              <div
-                key={key}
-                className={[
-                  "flex items-center justify-between rounded-2xl px-4 py-3 ring-1 ring-foreground/10",
-                  idx === 0 ? "bg-foreground/5" : "bg-background/10",
-                ].join(" ")}
-              >
-                <span className="text-sm font-semibold">{label}</span>
-                <span className="text-xs text-foreground/60">Pluggable</span>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="lg:col-span-1">
-          <UploadDropzone
-            onUpload={handleUpload}
-            isUploading={createAndUploadMutation.isPending}
-          />
-
+        <section className="animate-slide-up">
+          <UploadDropzone onUpload={handleUpload} isUploading={createAndUploadMutation.isPending} />
           {pageError ? (
-            <div className="mt-4 rounded-2xl bg-rose-500/10 px-4 py-3 text-sm text-rose-200 ring-1 ring-rose-500/30">
+            <div className="mt-4 rounded-2xl bg-error/10 px-4 py-3 text-sm text-error ring-1 ring-error/30">
               {pageError}
             </div>
           ) : null}
         </section>
 
-        <section className="rounded-3xl bg-background/10 p-6 ring-1 ring-foreground/10 lg:col-span-1">
-          <h2 className="text-sm font-semibold">{recentJobsLabel}</h2>
-          <div className="mt-4 flex flex-col gap-3">
-            {recents.length === 0 ? (
-              <div className="text-sm text-foreground/60">
-                Create your first job to see status here.
+        <section className="panel-surface rounded-3xl p-5">
+          <div className="mb-4 text-sm font-semibold text-foreground/90">AI pipeline preview</div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+            {[
+              "1. Silence analysis",
+              "2. Best-take ranking",
+              "3. Caption timing",
+              "4. Export rough cut",
+            ].map((label, idx) => (
+              <div key={label} className="rounded-2xl bg-surface-2/70 px-3 py-2 text-xs text-muted-foreground">
+                <div className="mb-2 h-1.5 rounded-full bg-surface-3">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-accent to-accent-2"
+                    style={{ width: idx === 0 && createAndUploadMutation.isPending ? "60%" : "20%" }}
+                  />
+                </div>
+                {label}
               </div>
-            ) : (
-              recents.map((job) => (
-                <button
-                  key={job.jobId}
-                  className="flex w-full items-center justify-between gap-3 rounded-2xl bg-background/20 px-4 py-3 text-left ring-1 ring-foreground/10 transition-colors hover:bg-background/30"
-                  onClick={() => router.push(`/jobs/${job.jobId}`)}
-                  type="button"
-                >
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold">{job.jobId}</div>
-                    <div className="mt-1 text-xs text-foreground/60">
-                      {new Date(job.createdAt).toLocaleString()}
-                    </div>
-                  </div>
-                  <span className="text-xs text-foreground/70">
-                    {job.status === "queued" ? "Queued" : job.status}
-                  </span>
-                </button>
-              ))
-            )}
+            ))}
           </div>
         </section>
       </div>
+
+      <aside className="fixed bottom-5 right-5 z-30 max-w-sm">
+        <div className="panel-surface rounded-2xl p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-xs font-semibold text-foreground/85">{recentJobsLabel}</div>
+            <Button variant="ghost" onClick={() => setShowRecents((v) => !v)}>
+              {showRecents ? "Hide" : "Show"}
+            </Button>
+          </div>
+          {showRecents ? (
+            <div className="mt-3 flex max-h-72 flex-col gap-2 overflow-auto">
+              {recents.length === 0 ? (
+                <div className="text-xs text-muted-foreground">No recent jobs yet.</div>
+              ) : (
+                recents.map((job) => (
+                  <button
+                    key={job.jobId}
+                    className="rounded-xl bg-surface-2/80 px-3 py-2 text-left transition hover:bg-surface-3/85"
+                    onClick={() => router.push(`/jobs/${job.jobId}`)}
+                    type="button"
+                  >
+                    <div className="truncate text-xs font-semibold text-foreground/90">{job.jobId}</div>
+                    <div className="mt-0.5 text-[11px] text-muted-foreground">
+                      {new Date(job.createdAt).toLocaleString()} - {job.status}
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          ) : null}
+        </div>
+      </aside>
     </main>
   );
 }

@@ -49,8 +49,13 @@ export default function AgentInsightsPanel({
   const [chatSubmitting, setChatSubmitting] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const [optimisticChat, setOptimisticChat] = useState<JobChatMessage[]>([]);
+  const [activeTab, setActiveTab] = useState<"overview" | "clips" | "story" | "chat">("overview");
+  const [highlightClip, setHighlightClip] = useState<number | null>(null);
 
-  const persistedChat = (job?.outputs?.chatHistory ?? []) as JobChatMessage[];
+  const persistedChat = useMemo(
+    () => (job?.outputs?.chatHistory ?? []) as JobChatMessage[],
+    [job?.outputs?.chatHistory],
+  );
 
   const chatMessages = useMemo(() => {
     const byId = new Map<string, JobChatMessage>();
@@ -119,16 +124,41 @@ export default function AgentInsightsPanel({
 
   if (!hasAgentData) return null;
 
+  const tabs: Array<{ id: "overview" | "clips" | "story" | "chat"; label: string }> = [
+    { id: "overview", label: "Overview" },
+    { id: "clips", label: "Clips" },
+    { id: "story", label: "Story" },
+    { id: "chat", label: "Chat" },
+  ];
+
   return (
-    <div className="mt-6 space-y-4">
+    <div className="mt-6 space-y-4 animate-fade-in">
       <div>
         <h2 className="text-sm font-semibold text-foreground/90">
-          Agent insights
+          AI co-pilot insights
         </h2>
         <p className="mt-1 text-xs text-foreground/60">
           Multi-agent analysis (content, story, viral, titles) and a bounded refinement loop
           that may adjust your timeline before export.
         </p>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setActiveTab(tab.id)}
+            className={[
+              "rounded-full px-3 py-1.5 text-xs transition",
+              activeTab === tab.id
+                ? "bg-gradient-to-r from-accent to-accent-2 text-white"
+                : "bg-surface-2/80 text-muted-foreground hover:text-foreground",
+            ].join(" ")}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       {agentErr ? (
@@ -140,7 +170,7 @@ export default function AgentInsightsPanel({
         </div>
       ) : null}
 
-      {orch ? (
+      {activeTab === "overview" && orch ? (
         <div className="rounded-2xl bg-foreground/5 px-4 py-3 text-xs ring-1 ring-foreground/10">
           <div className="font-semibold text-foreground/85">Orchestration</div>
           <div className="mt-2 space-y-1 text-foreground/70">
@@ -193,7 +223,7 @@ export default function AgentInsightsPanel({
         </div>
       ) : null}
 
-      {refinement ? (
+      {activeTab === "overview" && refinement ? (
         <div className="rounded-2xl bg-foreground/5 px-4 py-3 text-xs ring-1 ring-foreground/10">
           <div className="font-semibold text-foreground/85">Refinement loop</div>
           {refinement.summary ? (
@@ -248,7 +278,7 @@ export default function AgentInsightsPanel({
         </div>
       ) : null}
 
-      {analysis ? (
+      {activeTab === "overview" && analysis ? (
         <div className="rounded-2xl bg-foreground/5 px-4 py-3 text-xs ring-1 ring-foreground/10">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <div className="font-semibold text-foreground/85">
@@ -301,7 +331,7 @@ export default function AgentInsightsPanel({
         </div>
       ) : null}
 
-      {story?.beats?.length ? (
+      {activeTab === "story" && story?.beats?.length ? (
         <div className="rounded-2xl bg-foreground/5 px-4 py-3 text-xs ring-1 ring-foreground/10">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <div className="font-semibold text-foreground/85">Story structure</div>
@@ -338,20 +368,24 @@ export default function AgentInsightsPanel({
         </div>
       ) : null}
 
-      {viralRows.length ? (
-        <div className="rounded-2xl bg-foreground/5 px-4 py-3 text-xs ring-1 ring-foreground/10">
+      {activeTab === "clips" && viralRows.length ? (
+        <div className="rounded-2xl bg-foreground/5 px-4 py-3 text-xs ring-1 ring-foreground/10 animate-slide-up">
           <div className="font-semibold text-foreground/85">
             Viral clips & titles
           </div>
           <p className="mt-1 text-foreground/55">
             Preview exports a clip for the timestamps returned by Gemini.
           </p>
-          <ul className="mt-3 max-h-64 space-y-3 overflow-auto">
+          <ul className="mt-3 grid max-h-[28rem] grid-cols-1 gap-3 overflow-auto md:grid-cols-2">
             {viralRows.map(({ clip, titleHookSet }, i) => (
               <li
                 key={`${clip.startMs}-${clip.endMs}-${i}`}
-                className="rounded-xl bg-background/25 px-3 py-2 ring-1 ring-foreground/10"
+                className={[
+                  "rounded-xl bg-background/25 px-3 py-3 ring-1 ring-foreground/10 transition",
+                  highlightClip === i ? "ring-accent/70" : "",
+                ].join(" ")}
               >
+                <div className="mb-2 h-24 rounded-lg bg-surface-2/80" />
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     <div className="font-medium text-foreground/85">
@@ -373,6 +407,17 @@ export default function AgentInsightsPanel({
                         ))}
                       </ul>
                     ) : null}
+                    <div className="mt-2">
+                      <div className="mb-1 text-[11px] text-muted-foreground">Virality score</div>
+                      <div className="h-1.5 rounded-full bg-surface-3">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-accent to-accent-2"
+                          style={{
+                            width: `${Math.max(8, Math.min(100, (clip.viralScore ?? 0.2) * 100))}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
                     {clip.platformRecommendations?.length ? (
                       <div className="mt-2 text-foreground/50">
                         platforms: {clip.platformRecommendations.join(", ")}
@@ -380,13 +425,24 @@ export default function AgentInsightsPanel({
                     ) : null}
                   </div>
                   {onPreviewClipRange ? (
-                    <button
-                      type="button"
-                      className="shrink-0 rounded-full bg-foreground/15 px-3 py-1 text-[11px] font-medium text-foreground/85 ring-1 ring-foreground/15 hover:bg-foreground/25"
-                      onClick={() => onPreviewClipRange(clip.startMs, clip.endMs)}
-                    >
-                      Preview
-                    </button>
+                    <div className="flex shrink-0 gap-2">
+                      <button
+                        type="button"
+                        className="rounded-full bg-foreground/15 px-3 py-1 text-[11px] font-medium text-foreground/85 ring-1 ring-foreground/15 hover:bg-foreground/25"
+                        onClick={() => {
+                          setHighlightClip(i);
+                          onPreviewClipRange(clip.startMs, clip.endMs);
+                        }}
+                      >
+                        Preview
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-full bg-accent/20 px-3 py-1 text-[11px] font-medium text-accent-2 ring-1 ring-accent/35 hover:bg-accent/30"
+                      >
+                        Add to Timeline
+                      </button>
+                    </div>
                   ) : null}
                 </div>
               </li>
@@ -395,9 +451,10 @@ export default function AgentInsightsPanel({
         </div>
       ) : null}
 
+      {activeTab === "chat" ? (
       <form
         onSubmit={handleChatSubmit}
-        className="rounded-2xl bg-foreground/5 px-4 py-3 text-xs ring-1 ring-foreground/10"
+        className="rounded-2xl bg-foreground/5 px-4 py-3 text-xs ring-1 ring-foreground/10 animate-slide-up"
       >
         <div className="font-semibold text-foreground/85">Agent chat</div>
         <p className="mt-1 text-foreground/55">
@@ -412,8 +469,8 @@ export default function AgentInsightsPanel({
                 key={m.id}
                 className={
                   m.role === "user"
-                    ? "rounded-xl bg-background/25 px-3 py-2 text-foreground/80 ring-1 ring-foreground/10"
-                    : "rounded-xl bg-violet-500/10 px-3 py-2 text-foreground/80 ring-1 ring-violet-500/20"
+                    ? "ml-auto max-w-[85%] rounded-xl bg-background/25 px-3 py-2 text-foreground/80 ring-1 ring-foreground/10"
+                    : "max-w-[85%] rounded-xl bg-violet-500/10 px-3 py-2 text-foreground/80 ring-1 ring-violet-500/20"
                 }
               >
                 <div className="flex items-baseline justify-between gap-2">
@@ -432,6 +489,15 @@ export default function AgentInsightsPanel({
               </li>
             ))}
           </ul>
+        ) : null}
+
+        {chatMessages.some((m) => m.role === "assistant" && m.status !== "done") ? (
+          <div className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground">
+            <span className="animate-pulse">.</span>
+            <span className="animate-pulse [animation-delay:120ms]">.</span>
+            <span className="animate-pulse [animation-delay:240ms]">.</span>
+            AI is thinking
+          </div>
         ) : null}
 
         <label className="mt-3 block">
@@ -455,8 +521,9 @@ export default function AgentInsightsPanel({
           {chatError ? <span className="text-rose-200/90">{chatError}</span> : null}
         </div>
       </form>
+      ) : null}
 
-      {trace?.length ? (
+      {activeTab === "overview" && trace?.length ? (
         <div className="rounded-2xl bg-foreground/5 px-4 py-3 text-xs ring-1 ring-foreground/10">
           <div className="font-semibold text-foreground/85">Agent trace</div>
           <ul className="mt-2 space-y-2">

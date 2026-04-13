@@ -159,68 +159,77 @@ export default function UploadDropzone({
         }}
         onDrop={onDrop}
         className={[
-          "relative flex min-h-[280px] w-full flex-col items-center justify-center gap-3 rounded-3xl border-2 border-dashed p-6 text-center transition-colors",
-          dragActive ? "border-foreground/50 bg-foreground/5" : "border-foreground/15 bg-background/10",
+          "relative min-h-[340px] w-full rounded-3xl p-[1px] transition-all duration-300",
+          dragActive ? "scale-[1.02] shadow-[0_18px_42px_rgba(124,92,255,0.32)]" : "shadow-elevated",
         ].join(" ")}
       >
-        <input
-          id={inputId}
-          className="hidden"
-          type="file"
-          accept={acceptAttr}
-          onChange={onChange}
-        />
-
-        <svg
-          width="54"
-          height="54"
-          viewBox="0 0 54 54"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-          className="mb-1"
-          aria-hidden="true"
+        <div
+          className={[
+            "relative flex h-full min-h-[338px] flex-col items-center justify-center rounded-[23px] border p-8 text-center",
+            "bg-gradient-to-b from-surface-2/95 to-surface-1/90",
+            dragActive ? "border-accent/80" : "border-white/15",
+          ].join(" ")}
         >
-          <path
-            d="M27 9V27"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
+          <div
+            className={[
+              "absolute inset-0 rounded-[23px] bg-gradient-to-r from-accent/30 via-accent-2/20 to-accent/30 opacity-30 transition-opacity",
+              dragActive ? "opacity-80" : "",
+            ].join(" ")}
+            aria-hidden="true"
           />
-          <path
-            d="M18 18L27 9L36 18"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+          <input
+            id={inputId}
+            className="hidden"
+            type="file"
+            accept={acceptAttr}
+            onChange={onChange}
+            disabled={isUploading}
           />
-          <path
-            d="M14 29C14 39 20 45 27 45C34 45 40 39 40 29"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-        </svg>
 
-        <div className="flex flex-col gap-2">
-          <p className="text-sm font-semibold tracking-wide text-foreground/90">
-            Drag and drop a video
-          </p>
-          <p className="text-sm text-foreground/60">
-            or click to browse. We will generate a rough cut with word-timed captions.
-          </p>
+          <svg
+            width="72"
+            height="72"
+            viewBox="0 0 72 72"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            className="relative z-10 mb-3 text-accent-2"
+            aria-hidden="true"
+          >
+            <path
+              d="M50 50H22C15.4 50 10 44.6 10 38C10 31.4 15.4 26 22 26C23.2 19.2 29 14 36 14C44 14 50.5 20.5 50.5 28.5C56.3 29.2 61 34.1 61 40C61 45.5 56.5 50 51 50H50Z"
+              stroke="currentColor"
+              strokeWidth="2.5"
+            />
+            <path d="M36 28V48" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+            <path
+              d="M28 36L36 28L44 36"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+
+          <div className="relative z-10 flex max-w-xl flex-col gap-2">
+            <p className="text-xl font-semibold tracking-tight text-foreground">
+              Drop your video here or click to browse
+            </p>
+            <p className="text-sm text-muted-foreground">
+              AI will detect high-impact moments, build a rough cut, and generate frame-accurate
+              captions.
+            </p>
+          </div>
+
+          <div className="relative z-10 mt-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
+            <span>Accepts: {acceptMimeTypes.slice(0, 2).join(", ")}</span>
+            <span>Max: {maxSizeMb} MB</span>
+          </div>
+
+          <label
+            htmlFor={inputId}
+            className={`absolute inset-0 cursor-pointer rounded-3xl ${isUploading ? "pointer-events-none" : ""}`}
+          />
         </div>
-
-        <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-xs text-foreground/60">
-          <span>Accepts: {acceptMimeTypes.slice(0, 2).join(", ")}</span>
-          <span>Max: {maxSizeMb} MB</span>
-        </div>
-
-        <label
-          htmlFor={inputId}
-          className="absolute inset-0 cursor-pointer rounded-3xl"
-        >
-          {/* click overlay to trigger the hidden file input */}
-        </label>
       </div>
 
       {error ? (
@@ -230,29 +239,32 @@ export default function UploadDropzone({
       ) : null}
 
       {fileMeta ? (
-        <div className="flex flex-col gap-2 rounded-2xl bg-foreground/5 p-4 ring-1 ring-foreground/10">
+        <div className="animate-slide-up panel-surface flex flex-col gap-3 rounded-2xl p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="truncate text-sm font-semibold">{fileMeta.name}</div>
-              <div className="mt-1 text-xs text-foreground/60">
+              <div className="truncate text-sm font-semibold text-foreground/95">{fileMeta.name}</div>
+              <div className="mt-1 text-xs text-muted-foreground">
                 {fileMeta.size} · Duration {fileMeta.duration}
               </div>
             </div>
 
             <Button
               variant="primary"
-              disabled={isUploading}
+              loading={isUploading}
               onClick={() => {
                 if (!selectedFile) return;
                 void onUpload(selectedFile);
               }}
             >
-              {isUploading ? "Processing..." : "Upload & Create Job"}
+              {isUploading ? "Processing..." : "Begin Processing"}
             </Button>
           </div>
+          {isUploading ? (
+            <div className="animate-shimmer relative h-2 overflow-hidden rounded-full bg-surface-3" />
+          ) : null}
         </div>
       ) : (
-        <div className="text-xs text-foreground/60">
+        <div className="text-xs text-muted-foreground">
           Select a video to enable upload.
         </div>
       )}

@@ -2,20 +2,21 @@
 
 import type { ReactNode } from "react";
 
-type BadgeTone = "neutral" | "success" | "warning" | "danger";
+type BadgeTone = "default" | "success" | "warning" | "error" | "info";
 
 export default function Badge({
-  tone = "neutral",
+  tone = "default",
   children,
 }: {
   tone?: BadgeTone;
   children: ReactNode;
 }) {
   const map: Record<BadgeTone, string> = {
-    neutral: "bg-background/40 ring-1 ring-foreground/15 text-foreground",
-    success: "bg-emerald-500/15 ring-1 ring-emerald-500/30 text-emerald-200",
-    warning: "bg-amber-500/15 ring-1 ring-amber-500/30 text-amber-200",
-    danger: "bg-rose-500/15 ring-1 ring-rose-500/30 text-rose-200",
+    default: "bg-surface-2/80 ring-1 ring-white/15 text-foreground/85",
+    success: "bg-success/15 ring-1 ring-success/35 text-success",
+    warning: "bg-warning/15 ring-1 ring-warning/35 text-warning",
+    error: "bg-error/15 ring-1 ring-error/35 text-error",
+    info: "bg-info/15 ring-1 ring-info/35 text-info",
   };
 
   return (
