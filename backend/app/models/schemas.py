@@ -334,6 +334,36 @@ class JobFeedbackResponse(BaseModel):
     ok: bool = True
 
 
+ChatRole = Literal["user", "assistant"]
+ChatMessageStatus = Literal["queued", "running", "done", "error"]
+
+
+class JobChatMessage(BaseModel):
+    """Persisted chat message stored under job outputs."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    role: ChatRole
+    text: str
+    created_at: str = Field(serialization_alias="createdAt")
+    status: ChatMessageStatus = "done"
+    error: str | None = None
+
+
+class JobChatRequest(BaseModel):
+    """User sends a chat message to control agents."""
+
+    message: str = Field(min_length=1, max_length=4000)
+
+
+class JobChatResponse(BaseModel):
+    job_id: str
+    accepted: bool = True
+    user_message_id: str = Field(serialization_alias="userMessageId")
+    assistant_message_id: str = Field(serialization_alias="assistantMessageId")
+
+
 class AgentOrchestrationState(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

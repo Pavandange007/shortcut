@@ -5,6 +5,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from app.core.config import settings
 from app.models.schemas import (
@@ -19,6 +20,10 @@ from app.models.schemas import (
     TranscriptResponse,
     ViralAnalysisResult,
 )
+from app.prompts.chat_clips_prompt import (
+    CHAT_CLIPS_PROMPT_VERSION,
+    build_chat_clips_prompt,
+)
 from app.services.agent_bus import get_message_bus
 from app.services.agents.base import AgentContext, AgentResult
 from app.services.agents.content_analyzer import (
@@ -30,7 +35,8 @@ from app.services.agents.refinement_agent import RefinementAgent
 from app.services.agents.story_structure_agent import StoryStructureAgent, heuristic_story_fallback
 from app.services.agents.title_hook_agent import TitleHookAgent, heuristic_title_fallback
 from app.services.agents.viral_potential_agent import ViralPotentialAgent, heuristic_viral_fallback
-from app.services.jobs_service import JobRecord
+from app.services.jobs_service import JobRecord, job_store
+from app.services.gemini_service import generate_agent_json
 from app.storage.files import (
     get_agent_cache_dir,
     get_agent_messages_jsonl_path,
@@ -257,6 +263,7 @@ class AgentOrchestrator:
         record.outputs["storyAnalysis"] = st_res.payload.model_dump(mode="json", by_alias=True)
         record.outputs["viralAnalysis"] = vi_res.payload.model_dump(mode="json", by_alias=True)
         record.outputs["titleHookAnalysis"] = th_res.payload.model_dump(mode="json", by_alias=True)
+        job_store.save_job(record)
 
         # --- Refinement loop ---
         max_iter = max(1, min(settings.refinement_max_iterations, 5))
@@ -384,6 +391,7 @@ class AgentOrchestrator:
             final_quality_score=final_score,
         )
         record.outputs["agentOrchestration"] = orch.model_dump(mode="json", by_alias=True)
+        job_store.save_job(record)
 
         now = datetime.now(timezone.utc).isoformat()
         msg_path = get_agent_messages_jsonl_path(user_id, job_id)
@@ -398,6 +406,205 @@ class AgentOrchestrator:
                 "finalQualityScore": final_score,
             },
         )
+        job_store.save_job(record)
+
+    def run_chat_clips_request(
+        self,
+        *,
+        user_id: str,
+        job_id: str,
+        transcript: TranscriptResponse,
+        record: JobRecord,
+        user_request: str,
+        target_duration_s: int,
+        clip_count: int,
+    ) -> ViralAnalysisResult:
+        """Run a chat-driven clip suggestion request.
+
+        This is a targeted mini-orchestration. It ensures content + story context exists,
+        then generates viral clip candidates with explicit duration/count constraints, and
+        finally generates titles/hooks for those clips.
+
+        Args:
+            user_id: Job owner.
+            job_id: Job identifier.
+            transcript: Transcript artifact for the job.
+            record: Mutable job record; outputs are updated in-place.
+            user_request: Raw user chat message.
+            target_duration_s: Preferred duration per clip (seconds).
+            clip_count: Preferred number of clips.
+
+        Returns:
+            ViralAnalysisResult produced for the request (also stored on the record).
+        """
+
+        bus = get_message_bus()
+        agents_dir = get_agents_dir(user_id, job_id)
+        cache_dir = get_agent_cache_dir(user_id, job_id)
+        timeline_path = get_timeline_json_path(user_id, job_id)
+
+        baseline = _load_timeline(timeline_path)
+        ctx = context_from_transcript(
+            user_id=user_id,
+            job_id=job_id,
+            transcript=transcript,
+            agents_dir=agents_dir,
+            cache_dir=cache_dir,
+        )
+        ctx = dataclasses.replace(
+            ctx,
+            baseline_timeline=list(baseline),
+            current_timeline=list(baseline),
+            user_feedback=_feedback_from_record(record),
+        )
+
+        bus.publish_simple(
+            job_id=job_id,
+            from_agent="chat",
+            type="chat_request",
+            payload={
+                "request": user_request[:400],
+                "mode": "clips",
+                "targetDurationS": target_duration_s,
+                "clipCount": clip_count,
+                "promptVersion": CHAT_CLIPS_PROMPT_VERSION,
+            },
+        )
+
+        # --- Content analyzer ---
+        try:
+            ca_res = ContentAnalyzerAgent().process(ctx)
+        except Exception:
+            logger.exception("chat content_analyzer crashed user_id=%s job_id=%s", user_id, job_id)
+            payload = _heuristic_moments(ctx.words)
+            ca_res = AgentResult(
+                name="content_analyzer",
+                payload=payload,
+                confidence=payload.confidence,
+                summary=payload.summary,
+                cache_hit=False,
+                inputs_hash="",
+            )
+
+        ctx = dataclasses.replace(ctx, content_analysis=ca_res.payload)
+        record.outputs["contentAnalysis"] = ca_res.payload.model_dump(mode="json", by_alias=True)
+        self._persist_analysis_and_trace(
+            user_id=user_id,
+            job_id=job_id,
+            record=record,
+            bus=bus,
+            result=ca_res,
+            write_path=get_content_analysis_json_path(user_id, job_id),
+            payload_dump=ca_res.payload.model_dump(mode="json"),
+            bus_type="content_analysis_done",
+            extra_bus={"momentCount": len(ca_res.payload.moments)},
+        )
+
+        # --- Story structure ---
+        try:
+            st_res = self.run_story_structure_agent(ctx)
+        except Exception:
+            logger.exception("chat story_structure crashed user_id=%s job_id=%s", user_id, job_id)
+            sp = heuristic_story_fallback(ctx, ctx.content_analysis or ContentAnalysisResult())
+            st_res = AgentResult(
+                name="story_structure",
+                payload=sp,
+                confidence=sp.confidence,
+                summary=sp.narrative_summary[:500],
+                cache_hit=False,
+                inputs_hash="",
+            )
+
+        ctx = dataclasses.replace(ctx, story_analysis=st_res.payload)
+        record.outputs["storyAnalysis"] = st_res.payload.model_dump(mode="json", by_alias=True)
+        self._persist_analysis_and_trace(
+            user_id=user_id,
+            job_id=job_id,
+            record=record,
+            bus=bus,
+            result=st_res,
+            write_path=get_story_analysis_json_path(user_id, job_id),
+            payload_dump=st_res.payload.model_dump(mode="json"),
+            bus_type="story_analysis_done",
+            extra_bus={"beatCount": len(st_res.payload.beats)},
+        )
+
+        # --- Constrained clip selection (chat) ---
+        prompt = build_chat_clips_prompt(
+            user_request=user_request,
+            target_duration_s=target_duration_s,
+            clip_count=clip_count,
+            content=ctx.content_analysis or ContentAnalysisResult(),
+            story=ctx.story_analysis or StoryAnalysisResult(),
+        )
+
+        try:
+            vi = generate_agent_json(prompt=prompt, response_model=ViralAnalysisResult)
+        except Exception as e:
+            logger.warning("chat_clips: Gemini failed (%s); using heuristic.", e)
+            vi = heuristic_viral_fallback(ctx.content_analysis or ContentAnalysisResult())
+
+        record.outputs["viralAnalysis"] = vi.model_dump(mode="json", by_alias=True)
+        _append_trace(
+            record,
+            AgentTraceEntry(
+                agent="chat_clips",
+                ts=datetime.now(timezone.utc).isoformat(),
+                confidence=vi.confidence,
+                summary=f"{len(vi.clips)} clip candidates (chat).",
+                inputs_hash=None,
+                cache_hit=False,
+            ),
+        )
+        bus.publish_simple(
+            job_id=job_id,
+            from_agent="chat_clips",
+            type="viral_analysis_done",
+            payload={"cacheHit": False, "confidence": vi.confidence, "clipCount": len(vi.clips)},
+        )
+        get_viral_analysis_json_path(user_id, job_id).write_text(
+            json.dumps(vi.model_dump(mode="json"), ensure_ascii=False),
+            encoding="utf-8",
+        )
+        job_store.save_job(record)
+
+        # --- Titles/hooks (depends on viral) ---
+        ctx = dataclasses.replace(ctx, viral_analysis=vi)
+        try:
+            th_res = self.run_title_hook_agent(ctx)
+        except Exception:
+            logger.exception("chat title_hook crashed user_id=%s job_id=%s", user_id, job_id)
+            tp = heuristic_title_fallback(vi, ctx.transcript.raw_text)
+            th_res = AgentResult(
+                name="title_hook",
+                payload=tp,
+                confidence=tp.confidence,
+                summary=f"{len(tp.clips)} title sets (fallback).",
+                cache_hit=False,
+                inputs_hash="",
+            )
+
+        record.outputs["titleHookAnalysis"] = th_res.payload.model_dump(mode="json", by_alias=True)
+        self._persist_analysis_and_trace(
+            user_id=user_id,
+            job_id=job_id,
+            record=record,
+            bus=bus,
+            result=th_res,
+            write_path=get_title_hook_analysis_json_path(user_id, job_id),
+            payload_dump=th_res.payload.model_dump(mode="json", by_alias=True),
+            bus_type="title_hook_analysis_done",
+            extra_bus={"titleClipCount": len(th_res.payload.clips)},
+        )
+
+        orch = AgentOrchestrationState(
+            phase="chat_clips_complete",
+            active_agents=["content_analyzer", "story_structure", "chat_clips", "title_hook"],
+            last_messages=bus.to_ui_dicts(job_id, limit=16),
+        )
+        record.outputs["agentOrchestration"] = orch.model_dump(mode="json", by_alias=True)
+        job_store.save_job(record)
+        return vi
 
     def _persist_analysis_and_trace(
         self,
@@ -431,6 +638,7 @@ class AgentOrchestrator:
                 cache_hit=result.cache_hit,
             ),
         )
+        job_store.save_job(record)
 
 
 def run_post_transcript_agents(

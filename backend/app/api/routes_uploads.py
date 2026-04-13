@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import threading
 
-from fastapi import APIRouter, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, File, Header, HTTPException, UploadFile, status
 
 from app.core.config import settings
 from app.models.schemas import JobCreateResponse, JobResponse, JobUploadResponse
@@ -47,6 +47,12 @@ async def upload_job_video(
     user_id = resolve_user_id(authorization, x_user_id)
     record = job_store.get_job(job_id=job_id, user_id=user_id)
     if record is None:
+        owner = job_store.find_job_owner(job_id=job_id)
+        if owner and owner != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Job belongs to a different session.",
+            )
         raise HTTPException(status_code=404, detail="Job not found.")
 
     video_path = get_video_path(user_id=user_id, job_id=job_id)
@@ -95,6 +101,12 @@ def get_job(
     user_id = resolve_user_id(authorization, x_user_id)
     record = job_store.get_job(job_id=job_id, user_id=user_id)
     if record is None:
+        owner = job_store.find_job_owner(job_id=job_id)
+        if owner and owner != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Job belongs to a different session.",
+            )
         raise HTTPException(status_code=404, detail="Job not found.")
     return job_store.to_response(record)
 

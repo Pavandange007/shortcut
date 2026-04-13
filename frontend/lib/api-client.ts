@@ -1,5 +1,7 @@
 import type {
   Job,
+  JobChatRequestPayload,
+  JobChatResponsePayload,
   JobFeedbackPayload,
   JobOverallStatus,
   JobStepKey,
@@ -60,6 +62,14 @@ export function isJobNotFoundError(e: unknown): boolean {
   return (
     m.includes("404") &&
     (m.includes("Job not found") || m.includes('"detail":"Job not found"'))
+  );
+}
+
+export function isJobForbiddenError(e: unknown): boolean {
+  const m = serializeUnknownError(e).errorMessage;
+  return (
+    m.includes("403") &&
+    (m.includes("different session") || m.includes('"detail":"Job belongs to a different session"'))
   );
 }
 
@@ -209,5 +219,17 @@ export async function submitJobFeedback(
     const text = await res.text();
     throw new Error(`Feedback failed (${res.status}): ${text}`);
   }
+}
+
+export async function submitJobChatMessage(
+  jobId: string,
+  body: JobChatRequestPayload,
+): Promise<JobChatResponsePayload> {
+  const res = await authedFetch(`${API_BASE_URL}/jobs/${jobId}/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return await parseJson<JobChatResponsePayload>(res);
 }
 

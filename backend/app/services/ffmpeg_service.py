@@ -468,3 +468,55 @@ def export_rough_cut(
 
     _run_ffmpeg(cmd, context="rough-cut export")
 
+
+def export_clip(
+    *,
+    video_path: Path,
+    start_ms: int,
+    end_ms: int,
+    output_path: Path,
+) -> None:
+    """
+    Export a single MP4 clip from ``video_path`` for preview.
+
+    Uses a fast H.264/AAC encode to avoid keyframe/codec edge-cases when cutting with stream-copy.
+    """
+
+    if not video_path.exists():
+        raise FileNotFoundError(f"Video not found: {video_path}")
+    start_ms_i = max(0, int(start_ms))
+    end_ms_i = max(0, int(end_ms))
+    if end_ms_i <= start_ms_i:
+        raise ValueError("end_ms must be greater than start_ms.")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    ffmpeg_exe = _ffmpeg_exe_or_raise()
+    start_s = start_ms_i / 1000.0
+    duration_s = (end_ms_i - start_ms_i) / 1000.0
+
+    cmd = [
+        str(ffmpeg_exe),
+        "-y",
+        "-i",
+        str(video_path).replace("\\", "/"),
+        "-ss",
+        f"{start_s:.3f}",
+        "-t",
+        f"{duration_s:.3f}",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "20",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "160k",
+        "-movflags",
+        "+faststart",
+        str(output_path).replace("\\", "/"),
+    ]
+    _run_ffmpeg(cmd, context="clip export")
+

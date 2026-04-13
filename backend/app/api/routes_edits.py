@@ -80,6 +80,7 @@ async def silence_timeline_job(
 
     record.steps["silence_removal"] = "done"
     record.overall_status = "running"
+    job_store.save_job(record)
 
     return SilenceTimelineResponse(timeline=timeline)
 
@@ -125,6 +126,7 @@ async def captions_job(
 
     record.steps["captions"] = "done"
     record.overall_status = "running"
+    job_store.save_job(record)
 
     if not request.burn_in:
         return CaptionsResponse(captions=captions, burned_captions_url=None)
@@ -232,6 +234,7 @@ async def export_job(
 
     record.steps["export"] = "running"
     record.overall_status = "running"
+    job_store.save_job(record)
 
     try:
         await run_in_threadpool(
@@ -253,6 +256,7 @@ async def export_job(
     record.outputs["roughCutUrl"] = f"/jobs/{job_id}/rough-cut"
     record.outputs["media_revision"] = int(time.time() * 1000)
     record.overall_status = "completed"
+    job_store.save_job(record)
 
     return ExportResponse(rough_cut_url=record.outputs["roughCutUrl"])
 

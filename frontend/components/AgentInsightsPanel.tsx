@@ -1,14 +1,15 @@
 "use client";
 
 import type { FormEvent } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   AgentTraceEntry,
   ContentMoment,
   Job,
   ViralClipOutput,
 } from "@/lib/types";
-import { submitJobFeedback } from "@/lib/api-client";
+import { submitJobChatMessage } from "@/lib/api-client";
+import type { JobChatMessage } from "@/lib/types";
 
 function formatMs(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -29,10 +30,10 @@ function mergeViralWithTitles(job: Job) {
 
 export default function AgentInsightsPanel({
   job,
-  onPreviewClipMs,
+  onPreviewClipRange,
 }: {
   job: Job | undefined;
-  onPreviewClipMs?: (startMs: number) => void;
+  onPreviewClipRange?: (startMs: number, endMs: number) => void;
 }) {
   const trace = job?.outputs?.agentTrace;
   const orch = job?.outputs?.agentOrchestration;
@@ -40,52 +41,83 @@ export default function AgentInsightsPanel({
   const story = job?.outputs?.storyAnalysis;
   const refinement = job?.outputs?.refinement;
   const agentErr = job?.outputs?.agentPhaseError;
-  const userFb = job?.outputs?.userFeedback;
-  const hasSavedFeedback =
-    Boolean(userFb) && Object.keys(userFb as object).length > 0;
 
   const moments = useMemo(() => analysis?.moments ?? [], [analysis]);
   const viralRows = useMemo(() => (job ? mergeViralWithTitles(job) : []), [job]);
 
-  const [fbNotes, setFbNotes] = useState("");
-  const [fbAudience, setFbAudience] = useState("");
-  const [fbSubmitting, setFbSubmitting] = useState(false);
-  const [fbMessage, setFbMessage] = useState<string | null>(null);
+  const [chatInput, setChatInput] = useState("");
+  const [chatSubmitting, setChatSubmitting] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [optimisticChat, setOptimisticChat] = useState<JobChatMessage[]>([]);
 
-  if (!job) return null;
+  const persistedChat = (job?.outputs?.chatHistory ?? []) as JobChatMessage[];
+
+  const chatMessages = useMemo(() => {
+    const byId = new Map<string, JobChatMessage>();
+    for (const m of persistedChat) byId.set(m.id, m);
+    for (const m of optimisticChat) if (!byId.has(m.id)) byId.set(m.id, m);
+    return Array.from(byId.values()).sort((a, b) =>
+      a.createdAt.localeCompare(b.createdAt),
+    );
+  }, [optimisticChat, persistedChat]);
+
+  useEffect(() => {
+    if (!persistedChat.length) return;
+    setOptimisticChat((prev) =>
+      prev.filter((m) => !persistedChat.some((p) => p.id === m.id)),
+    );
+  }, [persistedChat]);
+
+  async function handleChatSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!job?.id) return;
+    const message = chatInput.trim();
+    if (!message) return;
+
+    setChatSubmitting(true);
+    setChatError(null);
+    try {
+      const res = await submitJobChatMessage(job.id, { message });
+      const nowIso = new Date().toISOString();
+      setOptimisticChat((prev) => [
+        ...prev,
+        {
+          id: res.userMessageId,
+          role: "user",
+          text: message,
+          createdAt: nowIso,
+          status: "done",
+        },
+        {
+          id: res.assistantMessageId,
+          role: "assistant",
+          text: "Working…",
+          createdAt: nowIso,
+          status: "queued",
+        },
+      ]);
+      setChatInput("");
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setChatSubmitting(false);
+    }
+  }
 
   const hasAgentData =
-    Boolean(trace?.length) ||
+    Boolean(job) &&
+    (Boolean(trace?.length) ||
     Boolean(orch) ||
     Boolean(analysis) ||
     Boolean(story) ||
-    Boolean(job.outputs?.viralAnalysis) ||
-    Boolean(job.outputs?.titleHookAnalysis) ||
+    Boolean(job?.outputs?.viralAnalysis) ||
+    Boolean(job?.outputs?.titleHookAnalysis) ||
     Boolean(refinement) ||
     Boolean(agentErr) ||
-    hasSavedFeedback;
+    Boolean(persistedChat.length) ||
+    Boolean(optimisticChat.length));
 
   if (!hasAgentData) return null;
-
-  async function handleFeedbackSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!job.id) return;
-    setFbSubmitting(true);
-    setFbMessage(null);
-    try {
-      await submitJobFeedback(job.id, {
-        notes: fbNotes,
-        audience: fbAudience,
-      });
-      setFbMessage("Saved. Feedback will apply on the next pipeline run that uses agents.");
-      setFbNotes("");
-      setFbAudience("");
-    } catch (err) {
-      setFbMessage(err instanceof Error ? err.message : String(err));
-    } finally {
-      setFbSubmitting(false);
-    }
-  }
 
   return (
     <div className="mt-6 space-y-4">
@@ -312,7 +344,7 @@ export default function AgentInsightsPanel({
             Viral clips & titles
           </div>
           <p className="mt-1 text-foreground/55">
-            Preview jumps the rough cut to each clip start (after export).
+            Preview exports a clip for the timestamps returned by Gemini.
           </p>
           <ul className="mt-3 max-h-64 space-y-3 overflow-auto">
             {viralRows.map(({ clip, titleHookSet }, i) => (
@@ -347,11 +379,11 @@ export default function AgentInsightsPanel({
                       </div>
                     ) : null}
                   </div>
-                  {onPreviewClipMs ? (
+                  {onPreviewClipRange ? (
                     <button
                       type="button"
                       className="shrink-0 rounded-full bg-foreground/15 px-3 py-1 text-[11px] font-medium text-foreground/85 ring-1 ring-foreground/15 hover:bg-foreground/25"
-                      onClick={() => onPreviewClipMs(clip.startMs)}
+                      onClick={() => onPreviewClipRange(clip.startMs, clip.endMs)}
                     >
                       Preview
                     </button>
@@ -363,54 +395,64 @@ export default function AgentInsightsPanel({
         </div>
       ) : null}
 
-      {hasSavedFeedback ? (
-        <div className="rounded-2xl bg-foreground/5 px-4 py-3 text-xs text-foreground/70 ring-1 ring-foreground/10">
-          <div className="font-semibold text-foreground/85">Saved feedback</div>
-          <pre className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap break-words">
-            {JSON.stringify(userFb, null, 2)}
-          </pre>
-        </div>
-      ) : null}
-
       <form
-        onSubmit={handleFeedbackSubmit}
+        onSubmit={handleChatSubmit}
         className="rounded-2xl bg-foreground/5 px-4 py-3 text-xs ring-1 ring-foreground/10"
       >
-        <div className="font-semibold text-foreground/85">Agent feedback</div>
+        <div className="font-semibold text-foreground/85">Agent chat</div>
         <p className="mt-1 text-foreground/55">
-          Notes are stored on the job and read by refinement when you upload a new run or when
-          we add re-refinement.
+          Ask for clip candidates, hooks, or refinements. Example: “give me 6 viral clips around 20
+          seconds each”.
         </p>
-        <label className="mt-2 block">
-          <span className="text-foreground/50">Notes</span>
+
+        {chatMessages.length ? (
+          <ul className="mt-3 max-h-56 space-y-2 overflow-auto">
+            {chatMessages.map((m) => (
+              <li
+                key={m.id}
+                className={
+                  m.role === "user"
+                    ? "rounded-xl bg-background/25 px-3 py-2 text-foreground/80 ring-1 ring-foreground/10"
+                    : "rounded-xl bg-violet-500/10 px-3 py-2 text-foreground/80 ring-1 ring-violet-500/20"
+                }
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-[10px] uppercase tracking-wide text-foreground/45">
+                    {m.role}
+                    {m.status && m.status !== "done" ? ` · ${m.status}` : ""}
+                  </span>
+                  <span className="text-[10px] text-foreground/40">{m.createdAt}</span>
+                </div>
+                <div className="mt-1 whitespace-pre-wrap text-xs text-foreground/75">
+                  {m.text}
+                </div>
+                {m.error ? (
+                  <div className="mt-1 text-xs text-rose-200/90">{m.error}</div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+
+        <label className="mt-3 block">
+          <span className="text-foreground/50">Message</span>
           <textarea
-            className="mt-1 w-full rounded-xl border border-foreground/15 bg-background/30 px-3 py-2 text-sm text-foreground"
-            rows={3}
-            value={fbNotes}
-            onChange={(e) => setFbNotes(e.target.value)}
-            placeholder="Tone, must-keep lines, platform…"
-          />
-        </label>
-        <label className="mt-2 block">
-          <span className="text-foreground/50">Audience</span>
-          <input
-            className="mt-1 w-full rounded-xl border border-foreground/15 bg-background/30 px-3 py-2 text-sm text-foreground"
-            value={fbAudience}
-            onChange={(e) => setFbAudience(e.target.value)}
-            placeholder="e.g. beginner developers"
+            className="mt-1 w-full resize-y rounded-xl border border-foreground/15 bg-background/30 px-3 py-2 text-sm text-foreground"
+            rows={2}
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            placeholder="e.g. give me 20 second viral clips from this video"
           />
         </label>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
             type="submit"
-            disabled={fbSubmitting}
+            disabled={chatSubmitting}
             className="rounded-full bg-foreground/20 px-4 py-1.5 text-xs font-medium text-foreground/90 ring-1 ring-foreground/20 hover:bg-foreground/30 disabled:opacity-50"
           >
-            {fbSubmitting ? "Saving…" : "Save feedback"}
+            {chatSubmitting ? "Sending…" : "Send"}
           </button>
-          {fbMessage ? (
-            <span className="text-foreground/60">{fbMessage}</span>
-          ) : null}
+          {chatError ? <span className="text-rose-200/90">{chatError}</span> : null}
         </div>
       </form>
 

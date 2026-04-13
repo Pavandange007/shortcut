@@ -67,6 +67,7 @@ def run_job_pipeline(*, user_id: str, job_id: str) -> None:
             )
             return
         record.overall_status = "running"
+        job_store.save_job(record)
 
     logger.info("pipeline start user_id=%s job_id=%s", user_id, job_id)
 
@@ -75,6 +76,7 @@ def run_job_pipeline(*, user_id: str, job_id: str) -> None:
         record.overall_status = "failed"
         record.steps["silence_removal"] = "failed"
         record.outputs["error"] = "input_video missing"
+        job_store.save_job(record)
         logger.error(
             "pipeline failed: input video missing user_id=%s job_id=%s expected=%s",
             user_id,
@@ -84,6 +86,7 @@ def run_job_pipeline(*, user_id: str, job_id: str) -> None:
         return
 
     record.steps["silence_removal"] = "running"
+    job_store.save_job(record)
     try:
         transcript = transcribe_with_word_timestamps(video_path)
         transcript_path = get_transcript_json_path(user_id=user_id, job_id=job_id)
@@ -98,6 +101,7 @@ def run_job_pipeline(*, user_id: str, job_id: str) -> None:
         _write_json(timeline_path, [seg.model_dump(mode="json") for seg in timeline])
 
         record.steps["silence_removal"] = "done"
+        job_store.save_job(record)
         logger.info(
             "pipeline transcript+timeline ok user_id=%s job_id=%s words=%d",
             user_id,
@@ -119,10 +123,12 @@ def run_job_pipeline(*, user_id: str, job_id: str) -> None:
                 job_id,
             )
             record.outputs["agentPhaseError"] = str(agent_exc)
+            job_store.save_job(record)
     except Exception as e:
         record.steps["silence_removal"] = "failed"
         record.overall_status = "failed"
         record.outputs["error"] = f"transcription/timeline failed: {e}"
+        job_store.save_job(record)
         logger.exception(
             "pipeline failed at transcript/timeline user_id=%s job_id=%s",
             user_id,
@@ -131,17 +137,21 @@ def run_job_pipeline(*, user_id: str, job_id: str) -> None:
         return
 
     record.steps["best_take"] = "running"
+    job_store.save_job(record)
     try:
         best_take = _get_best_take_index(transcript_text=transcript.raw_text)
         record.outputs["bestTakeIndex"] = best_take.best_index
         record.outputs["bestTakeExplanation"] = best_take.explanation
         record.steps["best_take"] = "done"
+        job_store.save_job(record)
     except Exception as e:
         record.steps["best_take"] = "failed"
         record.outputs["error"] = f"best-take failed: {e}"
+        job_store.save_job(record)
 
     # Captions JSON (source timeline). Burn-in runs on rough_cut.mp4 after export.
     record.steps["captions"] = "running"
+    job_store.save_job(record)
     try:
         captions = group_words_into_captions(transcript.words)
         captions_path = get_captions_json_path(user_id=user_id, job_id=job_id)
@@ -152,16 +162,19 @@ def run_job_pipeline(*, user_id: str, job_id: str) -> None:
         record.outputs["burnedCaptionsPath"] = None
 
         record.steps["captions"] = "done"
+        job_store.save_job(record)
         logger.info("pipeline captions ok user_id=%s job_id=%s", user_id, job_id)
     except Exception as e:
         record.steps["captions"] = "failed"
         record.outputs["error"] = f"captions failed: {e}"
         record.overall_status = "failed"
+        job_store.save_job(record)
         logger.exception("pipeline failed at captions user_id=%s job_id=%s", user_id, job_id)
         return
 
     # Rough cut export depends on FFmpeg binary.
     record.steps["export"] = "running"
+    job_store.save_job(record)
     try:
         # Read timeline back from disk to keep the interfaces decoupled.
         timeline_path = get_timeline_json_path(user_id=user_id, job_id=job_id)
@@ -186,6 +199,7 @@ def run_job_pipeline(*, user_id: str, job_id: str) -> None:
             )
         except Exception as burn_exc:
             record.outputs["error_caption_burn"] = str(burn_exc)
+            job_store.save_job(record)
             logger.exception(
                 "pipeline caption burn onto rough cut failed user_id=%s job_id=%s",
                 user_id,
@@ -196,12 +210,14 @@ def run_job_pipeline(*, user_id: str, job_id: str) -> None:
         record.outputs["media_revision"] = int(time.time() * 1000)
         record.steps["export"] = "done"
         record.overall_status = "completed"
+        job_store.save_job(record)
         logger.info("pipeline completed user_id=%s job_id=%s", user_id, job_id)
     except Exception as e:
         record.steps["export"] = "failed"
         record.outputs["error_export"] = str(e)
         # Captions + transcript are still usable even if FFmpeg export isn't available.
         record.overall_status = "completed"
+        job_store.save_job(record)
         logger.error(
             "pipeline export failed user_id=%s job_id=%s — stored in outputs.error_export: %s",
             user_id,

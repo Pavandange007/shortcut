@@ -133,6 +133,29 @@ export type JobFeedbackPayload = {
   mustExcludeMs?: number[];
 };
 
+export type JobChatRole = "user" | "assistant";
+export type JobChatMessageStatus = "queued" | "running" | "done" | "error";
+
+export type JobChatMessage = {
+  id: string;
+  role: JobChatRole;
+  text: string;
+  createdAt: string;
+  status?: JobChatMessageStatus;
+  error?: string | null;
+};
+
+export type JobChatRequestPayload = {
+  message: string;
+};
+
+export type JobChatResponsePayload = {
+  jobId: string;
+  accepted: boolean;
+  userMessageId: string;
+  assistantMessageId: string;
+};
+
 export interface Job {
   id: string;
   createdAt: string;
@@ -160,6 +183,7 @@ export interface Job {
     titleHookAnalysis?: TitleHookAnalysisOutput;
     refinement?: RefinementJobOutput;
     userFeedback?: JobFeedbackPayload;
+    chatHistory?: JobChatMessage[];
   };
 }
 

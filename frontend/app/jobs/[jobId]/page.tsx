@@ -11,6 +11,7 @@ import type { JobStepKey, StepState } from "@/lib/types";
 import {
   getApiBaseUrl,
   getJobStatus,
+  isJobForbiddenError,
   isJobNotFoundError,
   serializeUnknownError,
 } from "@/lib/api-client";
@@ -42,10 +43,22 @@ export default function JobDetailsPage() {
   const jobId = params.jobId;
   const [showError, setShowError] = useState(false);
   const [previewSeekMs, setPreviewSeekMs] = useState<number | null>(null);
+  const [previewClipUrl, setPreviewClipUrl] = useState<string | null>(null);
 
   const handleSeekConsumed = useCallback(() => {
     setPreviewSeekMs(null);
   }, []);
+
+  const handlePreviewClipRange = useCallback(
+    (startMs: number, endMs: number) => {
+      if (!jobId) return;
+      setPreviewClipUrl(
+        `/jobs/${encodeURIComponent(jobId)}/clip?startMs=${encodeURIComponent(String(startMs))}&endMs=${encodeURIComponent(String(endMs))}`,
+      );
+      setPreviewSeekMs(0);
+    },
+    [jobId],
+  );
 
   const jobQuery = useQuery<Job, Error>({
     queryKey: ["jobStatus", jobId],
@@ -110,18 +123,13 @@ export default function JobDetailsPage() {
           <div className="rounded-3xl bg-background/10 p-6 ring-1 ring-foreground/10">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
-                <h1 className="truncate text-lg font-semibold">
-                  Job {jobId}
-                </h1>
+                <h1 className="truncate text-lg font-semibold">Job {jobId}</h1>
                 <p className="mt-2 text-sm text-foreground/70">
-                  Track the pipeline: transcription and timeline, multi-agent
-                  content analysis, best take, captions, and rough-cut export.
+                  Track the pipeline: transcription and timeline, multi-agent content analysis, best
+                  take, captions, and rough-cut export.
                 </p>
               </div>
-              <Button
-                variant="ghost"
-                onClick={() => router.push("/upload")}
-              >
+              <Button variant="ghost" onClick={() => router.push("/upload")}>
                 Back
               </Button>
             </div>
@@ -130,10 +138,7 @@ export default function JobDetailsPage() {
               <JobProgress statusByStep={stepStates} />
             </div>
 
-            <AgentInsightsPanel
-              job={job}
-              onPreviewClipMs={(ms) => setPreviewSeekMs(ms)}
-            />
+            <AgentInsightsPanel job={job} onPreviewClipRange={handlePreviewClipRange} />
 
             {stepStates.silence_removal === "running" ? (
               <p className="mt-4 rounded-2xl bg-amber-500/10 px-4 py-3 text-xs text-amber-100/95 ring-1 ring-amber-500/25">
@@ -191,7 +196,9 @@ export default function JobDetailsPage() {
                 <div className="mt-1 text-rose-200/90">
                   {jobQuery.error && isJobNotFoundError(jobQuery.error)
                     ? "Jobs are stored in memory on the API. After a backend restart, old links and “Recent jobs” IDs are invalid — start a new upload."
-                    : "Ensure the FastAPI backend is running at the URL in NEXT_PUBLIC_API_BASE_URL (default http://localhost:8000)."}
+                    : jobQuery.error && isJobForbiddenError(jobQuery.error)
+                      ? "Your session changed. This job belongs to a different session token — start a new upload."
+                      : "Ensure the FastAPI backend is running at the URL in NEXT_PUBLIC_API_BASE_URL (default http://localhost:8000)."}
                 </div>
                 {showError ? (
                   <pre className="mt-3 whitespace-pre-wrap text-xs">
@@ -199,10 +206,7 @@ export default function JobDetailsPage() {
                   </pre>
                 ) : null}
                 <div className="mt-2">
-                  <Button
-                    variant="ghost"
-                    onClick={() => setShowError((v) => !v)}
-                  >
+                  <Button variant="ghost" onClick={() => setShowError((v) => !v)}>
                     {showError ? "Hide details" : "Show details"}
                   </Button>
                 </div>
@@ -214,12 +218,27 @@ export default function JobDetailsPage() {
         <section className="w-full lg:w-7/12">
           <div className="rounded-3xl bg-background/10 p-6 ring-1 ring-foreground/10">
             <VideoPreview
-              roughCutUrl={job?.outputs?.roughCutUrl}
+              roughCutUrl={previewClipUrl ?? job?.outputs?.roughCutUrl}
               mediaRevision={job?.outputs?.media_revision}
               title="Rough cut preview"
               seekToMs={previewSeekMs}
               onSeekConsumed={handleSeekConsumed}
             />
+
+            {previewClipUrl ? (
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <div className="text-xs text-foreground/60">Showing a Gemini clip preview.</div>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setPreviewClipUrl(null);
+                    setPreviewSeekMs(null);
+                  }}
+                >
+                  Back to rough cut
+                </Button>
+              </div>
+            ) : null}
 
             <div className="mt-5 text-sm text-foreground/70">
               {job?.overallStatus === "failed"

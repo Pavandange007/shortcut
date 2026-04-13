@@ -37,6 +37,7 @@ async def transcript_job(
 
     record.overall_status = "running"
     record.steps["silence_removal"] = "running"
+    job_store.save_job(record)
 
     video_path = get_video_path(user_id=user_id, job_id=job_id)
     if not video_path.exists():
@@ -54,6 +55,7 @@ async def transcript_job(
 
     record.steps["silence_removal"] = "done"
     record.overall_status = "running"
+    job_store.save_job(record)
 
     return transcript
 

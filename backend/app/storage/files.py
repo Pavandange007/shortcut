@@ -68,6 +68,19 @@ def get_rough_cut_path(user_id: str, job_id: str) -> Path:
     return get_outputs_root(user_id, job_id) / "rough_cut.mp4"
 
 
+def get_clips_root(user_id: str, job_id: str) -> Path:
+    d = get_outputs_root(user_id, job_id) / "clips"
+    ensure_dir(d)
+    return d
+
+
+def get_clip_path(*, user_id: str, job_id: str, start_ms: int, end_ms: int) -> Path:
+    # Deterministic, cacheable file name for preview clips.
+    safe_start = max(0, int(start_ms))
+    safe_end = max(0, int(end_ms))
+    return get_clips_root(user_id, job_id) / f"clip_{safe_start}_{safe_end}.mp4"
+
+
 def get_captions_json_path(user_id: str, job_id: str) -> Path:
     return get_job_root(user_id, job_id) / "captions.json"
 
