@@ -26,6 +26,11 @@ class Settings(BaseSettings):
 
     # Models / AI keys (used later by other services)
     gemini_api_key: str = ""
+    gemini_agent_model: str = "gemini-2.0-flash"
+    agent_prompt_version: str = "v1"
+    refinement_max_iterations: int = 3
+    refinement_quality_threshold: float = 0.78
+    refinement_quality_epsilon: float = 0.02
     whisper_model_name: str = "medium"
     gpu_device: str = "cuda:0"
 

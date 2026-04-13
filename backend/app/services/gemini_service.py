@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import threading
-from typing import Final
+from typing import Final, TypeVar
+
+from pydantic import BaseModel
 
 from app.core.config import settings
 from app.models.schemas import BestTakeResponse
@@ -10,6 +12,8 @@ from app.prompts.best_take_prompt import build_best_take_prompt
 
 _CLIENT_LOCK: Final[threading.Lock] = threading.Lock()
 _CLIENT = None
+
+TModel = TypeVar("TModel", bound=BaseModel)
 
 
 def _get_client():
@@ -34,6 +38,49 @@ def _get_client():
             ) from e
         _CLIENT = genai.Client(api_key=settings.gemini_api_key)
         return _CLIENT
+
+
+def _parse_json_object_from_model_text(raw_text: str) -> str:
+    text = (raw_text or "").strip()
+    if not text:
+        raise RuntimeError("Gemini returned an empty response.")
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return text[start : end + 1]
+    return text
+
+
+def generate_agent_json(
+    *,
+    prompt: str,
+    response_model: type[TModel],
+    model: str | None = None,
+) -> TModel:
+    """
+    Call Gemini and parse a single JSON object into a Pydantic model.
+
+    Used by multi-agent services; keeps parsing tolerant of markdown/extra text.
+    """
+
+    client = _get_client()
+    model_id = model or settings.gemini_agent_model
+    try:
+        response = client.models.generate_content(model=model_id, contents=prompt)
+    except Exception as e:
+        raise RuntimeError(f"Gemini request failed: {e}") from e
+
+    raw_text = (getattr(response, "text", None) or "").strip()
+    json_text = _parse_json_object_from_model_text(raw_text)
+
+    try:
+        data = json.loads(json_text)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"Gemini output was not valid JSON: {e}. Raw: {raw_text[:300]}"
+        ) from e
+
+    return response_model.model_validate(data)
 
 
 def select_best_take(transcripts: list[str]) -> BestTakeResponse:

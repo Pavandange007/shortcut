@@ -13,6 +13,7 @@ from app.api.routes_uploads import router as uploads_router
 from app.api.routes_edits import router as edits_router
 from app.api.routes_retakes import router as retakes_router
 from app.api.routes_auth import router as auth_router
+from app.api.routes_agents import router as agents_router
 from app.core.config import settings
 from app.services.ffmpeg_service import log_ffmpeg_startup_status
 
@@ -60,6 +61,7 @@ def create_app() -> FastAPI:
     app.include_router(edits_router)
     app.include_router(retakes_router)
     app.include_router(auth_router)
+    app.include_router(agents_router)
 
     return app
 

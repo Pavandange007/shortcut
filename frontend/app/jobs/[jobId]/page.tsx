@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
+import AgentInsightsPanel from "@/components/AgentInsightsPanel";
 import JobProgress from "@/components/JobProgress";
 import VideoPreview from "@/components/VideoPreview";
 import Button from "@/components/Button";
@@ -40,6 +41,11 @@ export default function JobDetailsPage() {
   const router = useRouter();
   const jobId = params.jobId;
   const [showError, setShowError] = useState(false);
+  const [previewSeekMs, setPreviewSeekMs] = useState<number | null>(null);
+
+  const handleSeekConsumed = useCallback(() => {
+    setPreviewSeekMs(null);
+  }, []);
 
   const jobQuery = useQuery<Job, Error>({
     queryKey: ["jobStatus", jobId],
@@ -108,8 +114,8 @@ export default function JobDetailsPage() {
                   Job {jobId}
                 </h1>
                 <p className="mt-2 text-sm text-foreground/70">
-                  Track the pipeline: silence removal, best take selection,
-                  captions, and rough-cut export.
+                  Track the pipeline: transcription and timeline, multi-agent
+                  content analysis, best take, captions, and rough-cut export.
                 </p>
               </div>
               <Button
@@ -123,6 +129,11 @@ export default function JobDetailsPage() {
             <div className="mt-6">
               <JobProgress statusByStep={stepStates} />
             </div>
+
+            <AgentInsightsPanel
+              job={job}
+              onPreviewClipMs={(ms) => setPreviewSeekMs(ms)}
+            />
 
             {stepStates.silence_removal === "running" ? (
               <p className="mt-4 rounded-2xl bg-amber-500/10 px-4 py-3 text-xs text-amber-100/95 ring-1 ring-amber-500/25">
@@ -206,6 +217,8 @@ export default function JobDetailsPage() {
               roughCutUrl={job?.outputs?.roughCutUrl}
               mediaRevision={job?.outputs?.media_revision}
               title="Rough cut preview"
+              seekToMs={previewSeekMs}
+              onSeekConsumed={handleSeekConsumed}
             />
 
             <div className="mt-5 text-sm text-foreground/70">

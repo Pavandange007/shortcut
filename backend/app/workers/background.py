@@ -16,6 +16,7 @@ from app.services.rough_cut_captions_service import burn_captions_onto_existing_
 from app.services.gemini_service import select_best_take
 from app.services.silence_service import build_speech_timeline, compute_silence_segments
 from app.services.whisper_service import transcribe_with_word_timestamps
+from app.services.agent_orchestrator import run_post_transcript_agents
 from app.services.jobs_service import job_store
 from app.storage.files import (
     get_captions_json_path,
@@ -103,6 +104,21 @@ def run_job_pipeline(*, user_id: str, job_id: str) -> None:
             job_id,
             len(transcript.words),
         )
+
+        try:
+            run_post_transcript_agents(
+                user_id=user_id,
+                job_id=job_id,
+                transcript=transcript,
+                record=record,
+            )
+        except Exception as agent_exc:
+            logger.exception(
+                "post-transcript agent phase failed user_id=%s job_id=%s",
+                user_id,
+                job_id,
+            )
+            record.outputs["agentPhaseError"] = str(agent_exc)
     except Exception as e:
         record.steps["silence_removal"] = "failed"
         record.overall_status = "failed"

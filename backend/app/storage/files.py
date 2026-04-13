@@ -75,3 +75,49 @@ def get_captions_json_path(user_id: str, job_id: str) -> Path:
 def get_burned_captions_path(user_id: str, job_id: str) -> Path:
     return get_outputs_root(user_id, job_id) / "captions_burned.mp4"
 
+
+def get_agents_dir(user_id: str, job_id: str) -> Path:
+    d = get_job_root(user_id, job_id) / "agents"
+    ensure_dir(d)
+    return d
+
+
+def get_agent_cache_dir(user_id: str, job_id: str) -> Path:
+    d = get_agents_dir(user_id, job_id) / "cache"
+    ensure_dir(d)
+    return d
+
+
+def get_content_analysis_json_path(user_id: str, job_id: str) -> Path:
+    return get_agents_dir(user_id, job_id) / "content_analysis.json"
+
+
+def get_agent_messages_jsonl_path(user_id: str, job_id: str) -> Path:
+    return get_agents_dir(user_id, job_id) / "messages.jsonl"
+
+
+def get_agents_iterations_dir(user_id: str, job_id: str) -> Path:
+    d = get_agents_dir(user_id, job_id) / "iterations"
+    ensure_dir(d)
+    return d
+
+
+def get_story_analysis_json_path(user_id: str, job_id: str) -> Path:
+    return get_agents_dir(user_id, job_id) / "story_analysis.json"
+
+
+def get_viral_analysis_json_path(user_id: str, job_id: str) -> Path:
+    return get_agents_dir(user_id, job_id) / "viral_analysis.json"
+
+
+def get_title_hook_analysis_json_path(user_id: str, job_id: str) -> Path:
+    return get_agents_dir(user_id, job_id) / "title_hook_analysis.json"
+
+
+def get_refinement_summary_json_path(user_id: str, job_id: str) -> Path:
+    return get_agents_dir(user_id, job_id) / "refinement.json"
+
+
+def get_refinement_iteration_json_path(user_id: str, job_id: str, iteration_index: int) -> Path:
+    return get_agents_iterations_dir(user_id, job_id) / f"{iteration_index:02d}.json"
+

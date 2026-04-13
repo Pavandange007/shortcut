@@ -1,18 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchAuthenticatedMediaObjectUrl } from "@/lib/api-client";
 
 export default function VideoPreview({
   roughCutUrl,
   mediaRevision,
   title = "Rough Cut",
+  seekToMs,
+  onSeekConsumed,
 }: {
   roughCutUrl?: string;
   /** When the server replaces the MP4, pass outputs.media_revision so we refetch the blob. */
   mediaRevision?: number;
   title?: string;
+  /** Seek preview to this timestamp (ms). Cleared via onSeekConsumed after applying. */
+  seekToMs?: number | null;
+  onSeekConsumed?: () => void;
 }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -58,6 +64,18 @@ export default function VideoPreview({
     };
   }, [roughCutUrl, mediaRevision]);
 
+  useEffect(() => {
+    if (seekToMs == null || seekToMs < 0) return;
+    const el = videoRef.current;
+    if (!el || !objectUrl) return;
+    try {
+      el.currentTime = seekToMs / 1000;
+    } catch {
+      /* ignore */
+    }
+    onSeekConsumed?.();
+  }, [seekToMs, objectUrl, onSeekConsumed]);
+
   return (
     <section className="rounded-3xl bg-background/10 p-4 ring-1 ring-foreground/10">
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -86,6 +104,7 @@ export default function VideoPreview({
         </div>
       ) : objectUrl ? (
         <video
+          ref={videoRef}
           controls
           src={objectUrl}
           className="w-full rounded-2xl ring-1 ring-foreground/10"

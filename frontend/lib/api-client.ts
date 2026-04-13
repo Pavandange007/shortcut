@@ -1,4 +1,10 @@
-import type { Job, JobOverallStatus, JobStepKey, StepState } from "./types";
+import type {
+  Job,
+  JobFeedbackPayload,
+  JobOverallStatus,
+  JobStepKey,
+  StepState,
+} from "./types";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
@@ -188,5 +194,20 @@ export async function fetchAuthenticatedMediaObjectUrl(
   }
   const blob = await res.blob();
   return URL.createObjectURL(blob);
+}
+
+export async function submitJobFeedback(
+  jobId: string,
+  body: JobFeedbackPayload,
+): Promise<void> {
+  const res = await authedFetch(`${API_BASE_URL}/jobs/${jobId}/feedback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Feedback failed (${res.status}): ${text}`);
+  }
 }
 
