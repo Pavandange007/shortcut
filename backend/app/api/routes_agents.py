@@ -17,8 +17,8 @@ from app.models.schemas import (
     JobFeedbackResponse,
     TranscriptResponse,
 )
-from app.services.agent_orchestrator import AgentOrchestrator
 from app.services.jobs_service import job_store
+from app.services.agentic_chat_runtime import run_agentic_chat_clips
 from app.storage.files import get_transcript_json_path
 
 router = APIRouter()
@@ -77,6 +77,9 @@ def post_job_feedback(
     user_id = resolve_user_id(authorization, x_user_id)
     record = job_store.get_job(job_id=job_id, user_id=user_id)
     if record is None:
+        owner = job_store.find_job_owner(job_id=job_id)
+        if owner and owner != user_id:
+            raise HTTPException(status_code=403, detail="Job belongs to a different session.")
         raise HTTPException(status_code=404, detail="Job not found.")
 
     record.outputs["userFeedback"] = body.model_dump(mode="json", by_alias=True)
@@ -94,6 +97,9 @@ def post_job_chat(
     user_id = resolve_user_id(authorization, x_user_id)
     record = job_store.get_job(job_id=job_id, user_id=user_id)
     if record is None:
+        owner = job_store.find_job_owner(job_id=job_id)
+        if owner and owner != user_id:
+            raise HTTPException(status_code=403, detail="Job belongs to a different session.")
         raise HTTPException(status_code=404, detail="Job not found.")
 
     now = datetime.now(timezone.utc).isoformat()
@@ -129,46 +135,15 @@ def post_job_chat(
         if r is None:
             return
 
-        # Mark assistant message running.
-        hist = r.outputs.get("chatHistory")
-        if isinstance(hist, list):
-            for item in hist:
-                if isinstance(item, dict) and item.get("id") == assistant_msg_id:
-                    item["status"] = "running"
-                    item["text"] = "Running agents…"
-                    break
-            job_store.save_job(r)
-
         try:
-            transcript_path = get_transcript_json_path(user_id=user_id, job_id=job_id)
-            if not transcript_path.exists():
-                raise RuntimeError(
-                    "Transcript not found yet. Upload/run the pipeline first, then try again."
-                )
-            raw = json.loads(transcript_path.read_text(encoding="utf-8-sig"))
-            transcript = TranscriptResponse.model_validate(raw)
-
-            AgentOrchestrator().run_chat_clips_request(
+            run_agentic_chat_clips(
                 user_id=user_id,
                 job_id=job_id,
-                transcript=transcript,
-                record=r,
+                assistant_msg_id=assistant_msg_id,
                 user_request=body.message,
                 target_duration_s=target_duration_s,
                 clip_count=clip_count,
             )
-
-            hist2 = r.outputs.get("chatHistory")
-            if isinstance(hist2, list):
-                for item in hist2:
-                    if isinstance(item, dict) and item.get("id") == assistant_msg_id:
-                        item["status"] = "done"
-                        item["text"] = (
-                            f"Generated viral clip candidates (target ~{target_duration_s}s). "
-                            "See “Viral clips & titles” below."
-                        )
-                        break
-            job_store.save_job(r)
         except Exception as e:
             hist3 = r.outputs.get("chatHistory")
             if isinstance(hist3, list):

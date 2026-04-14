@@ -52,6 +52,13 @@ export default function AgentInsightsPanel({
   const [activeTab, setActiveTab] = useState<"overview" | "clips" | "story" | "chat">("overview");
   const [highlightClip, setHighlightClip] = useState<number | null>(null);
 
+  const agenticEvents = useMemo(() => {
+    const raw = (job?.outputs as unknown as { agenticChatEvents?: unknown })?.agenticChatEvents;
+    return Array.isArray(raw)
+      ? (raw as Array<{ ts?: string; type?: string; message?: string }>)
+      : [];
+  }, [job?.outputs]);
+
   const persistedChat = useMemo(
     () => (job?.outputs?.chatHistory ?? []) as JobChatMessage[],
     [job?.outputs?.chatHistory],
@@ -497,6 +504,23 @@ export default function AgentInsightsPanel({
             <span className="animate-pulse [animation-delay:120ms]">.</span>
             <span className="animate-pulse [animation-delay:240ms]">.</span>
             AI is thinking
+          </div>
+        ) : null}
+
+        {agenticEvents.length ? (
+          <div className="mt-3 rounded-xl bg-background/20 p-3 ring-1 ring-foreground/10">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-foreground/55">
+              Agent run
+            </div>
+            <ul className="mt-2 max-h-40 space-y-1 overflow-auto font-mono text-[11px] text-foreground/70">
+              {agenticEvents.slice(-12).map((e, idx) => (
+                <li key={`${e.ts ?? "ts"}-${idx}`} className="flex gap-2">
+                  <span className="text-foreground/40">{e.type ?? "event"}</span>
+                  <span className="text-foreground/60">·</span>
+                  <span className="min-w-0 flex-1 truncate">{e.message ?? ""}</span>
+                </li>
+              ))}
+            </ul>
           </div>
         ) : null}
 

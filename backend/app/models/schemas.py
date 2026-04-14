@@ -40,6 +40,12 @@ class HealthResponse(BaseModel):
     version: str = "0.1.0"
     ffmpeg_available: bool = False
     ffmpeg_path: str | None = None
+    gemini_configured: bool = False
+    gemini_agent_model: str | None = None
+    gemini_api_key_hint: str | None = None
+    llm_provider: str = "gemini"
+    ollama_base_url: str | None = None
+    ollama_model: str | None = None
 
 
 class WordTiming(BaseModel):

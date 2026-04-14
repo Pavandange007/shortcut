@@ -25,6 +25,11 @@ const stepKeys: JobStepKey[] = [
   "export",
 ];
 
+function hasChatInFlight(job?: Job): boolean {
+  const hist = (job?.outputs?.chatHistory ?? []) as Array<{ status?: string }>;
+  return hist.some((m) => m.status === "queued" || m.status === "running");
+}
+
 function computeStepStates(job?: Job): Record<JobStepKey, StepState> {
   const base: Record<JobStepKey, StepState> = {
     silence_removal: "pending",
@@ -74,6 +79,7 @@ export default function JobDetailsPage() {
       if (query.state.status === "error") return false;
       const j = query.state.data;
       if (!j) return 2000;
+      if (hasChatInFlight(j)) return 2000;
       if (j.overallStatus === "completed" || j.overallStatus === "failed") return false;
       return 2000;
     },
@@ -85,6 +91,7 @@ export default function JobDetailsPage() {
   const lastJobJson = useRef<string>("");
   const lastPollErrorKey = useRef<string>("");
   const dragRef = useRef<HTMLDivElement | null>(null);
+  const lastAutoPreviewKey = useRef<string>("");
 
   useEffect(() => {
     if (!jobId) return;
@@ -122,6 +129,21 @@ export default function JobDetailsPage() {
       });
     }
   }, [jobId, job, jobQuery.isError, jobQuery.error]);
+
+  useEffect(() => {
+    if (!jobId) return;
+    if (!job?.outputs?.viralAnalysis?.clips?.length) return;
+    if (previewClipUrl) return;
+
+    const clips = job.outputs.viralAnalysis.clips;
+    const first = clips[0];
+    if (!first) return;
+
+    const key = `${first.startMs}-${first.endMs}-${clips.length}`;
+    if (key === lastAutoPreviewKey.current) return;
+    lastAutoPreviewKey.current = key;
+    handlePreviewClipRange(first.startMs, first.endMs);
+  }, [handlePreviewClipRange, job?.outputs?.viralAnalysis?.clips, jobId, previewClipUrl]);
 
   useEffect(() => {
     function onMove(e: MouseEvent) {

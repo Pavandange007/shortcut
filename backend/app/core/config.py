@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -25,8 +26,21 @@ class Settings(BaseSettings):
     ffmpeg_bin: str = ""
 
     # Models / AI keys (used later by other services)
+    llm_provider: str = "gemini"  # gemini | ollama
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_model: str = "gemma2:2b"
     gemini_api_key: str = ""
     gemini_agent_model: str = "gemini-2.0-flash"
+
+    @field_validator("gemini_api_key", "auth_secret", mode="before")
+    @classmethod
+    def _strip_whitespace(cls, v: str) -> str:
+        return v.strip() if isinstance(v, str) else v
+
+    # Vertex AI (preferred) - uses ADC credentials, not API key.
+    gemini_use_vertexai: bool = False
+    gcp_project: str = ""
+    gcp_location: str = "us-central1"
     agent_prompt_version: str = "v1"
     refinement_max_iterations: int = 3
     refinement_quality_threshold: float = 0.78

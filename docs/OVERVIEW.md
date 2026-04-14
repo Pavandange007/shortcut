@@ -122,7 +122,9 @@ CORS is controlled by **`API_CORS_ALLOW_ORIGIN`** (see below).
 |----------|------|
 | `AUTH_SECRET` | JWT signing secret (use a strong value in production). |
 | `AUTH_TOKEN_TTL_SECONDS` | Session lifetime. |
-| `GEMINI_API_KEY` | Optional; improves best-take / copy paths when present. |
+| `GEMINI_USE_VERTEXAI` | If `true`, Gemini calls go through Vertex AI (`aiplatform.googleapis.com`) using ADC. |
+| `GCP_PROJECT` / `GCP_LOCATION` | Required when `GEMINI_USE_VERTEXAI=true`. |
+| `GEMINI_API_KEY` | Used only when `GEMINI_USE_VERTEXAI=false`. |
 | `WHISPER_MODEL_NAME` | Quality vs. speed tradeoff (`medium`, `large`, `base`, …). |
 | `GPU_DEVICE` | e.g. `cuda:0` or CPU; backend may fall back if CUDA unavailable. |
 | `FFMPEG_BIN` | Optional full path to `ffmpeg` when it is not on `PATH`. |

@@ -538,20 +538,30 @@ class AgentOrchestrator:
             story=ctx.story_analysis or StoryAnalysisResult(),
         )
 
+        chat_clips_used_heuristic = False
+        chat_clips_error: str | None = None
         try:
             vi = generate_agent_json(prompt=prompt, response_model=ViralAnalysisResult)
         except Exception as e:
             logger.warning("chat_clips: Gemini failed (%s); using heuristic.", e)
+            chat_clips_used_heuristic = True
+            chat_clips_error = str(e)
             vi = heuristic_viral_fallback(ctx.content_analysis or ContentAnalysisResult())
 
         record.outputs["viralAnalysis"] = vi.model_dump(mode="json", by_alias=True)
+        record.outputs["chatClipsUsedHeuristic"] = chat_clips_used_heuristic
+        if chat_clips_error:
+            record.outputs["chatClipsError"] = chat_clips_error
         _append_trace(
             record,
             AgentTraceEntry(
                 agent="chat_clips",
                 ts=datetime.now(timezone.utc).isoformat(),
                 confidence=vi.confidence,
-                summary=f"{len(vi.clips)} clip candidates (chat).",
+                summary=(
+                    f"{len(vi.clips)} clip candidates (chat)."
+                    + (" (heuristic fallback)" if chat_clips_used_heuristic else "")
+                ),
                 inputs_hash=None,
                 cache_hit=False,
             ),
@@ -560,7 +570,12 @@ class AgentOrchestrator:
             job_id=job_id,
             from_agent="chat_clips",
             type="viral_analysis_done",
-            payload={"cacheHit": False, "confidence": vi.confidence, "clipCount": len(vi.clips)},
+            payload={
+                "cacheHit": False,
+                "confidence": vi.confidence,
+                "clipCount": len(vi.clips),
+                "usedHeuristic": chat_clips_used_heuristic,
+            },
         )
         get_viral_analysis_json_path(user_id, job_id).write_text(
             json.dumps(vi.model_dump(mode="json"), ensure_ascii=False),
